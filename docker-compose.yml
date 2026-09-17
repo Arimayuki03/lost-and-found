@@ -1,0 +1,30 @@
+# 端口仅绑定回环地址（127.0.0.1），避免 MinIO/Redis 直接暴露到公网。
+# 生产部署时 Redis 建议再加 command: redis-server --requirepass <密码>，
+# 并在后端 .env 中配置 REDIS_PASSWORD（后端客户端已支持）。
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: lostfound-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: lostfound-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+  redis_data:
