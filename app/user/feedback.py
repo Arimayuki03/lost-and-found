@@ -1,15 +1,16 @@
 from . import user
 from flask import request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError
 from app import db
 from app.models import Feedback
 from app.utils.page import paginate_query
+from app.utils.decorators import user_required
 
 
 # 用户提交反馈接口
 @user.route('/feedback', methods=['POST'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def submit_feedback():
     try:
         # 从请求中获取JSON数据（silent=True：无 JSON 体/Content-Type 错误时返回 None，走下方 400 而非 500）
@@ -58,7 +59,7 @@ def submit_feedback():
 
 # 用户查询自己的反馈记录接口
 @user.route('/feedback', methods=['GET'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def get_my_feedback():
     try:
         # 获取当前用户ID

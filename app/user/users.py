@@ -1,5 +1,5 @@
 from flask import request, jsonify, current_app
-from flask_jwt_extended import jwt_required, create_access_token, get_jwt_identity, create_refresh_token
+from flask_jwt_extended import create_access_token, get_jwt_identity, create_refresh_token
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from app import db
 from app.models import User
@@ -8,6 +8,7 @@ from app.utils.password import hash_password, verify_user_password
 from app.utils.ratelimit import ip_rate_limit
 from app.utils.account_lock import is_locked, record_failure, clear_failures, SURFACE_USER
 from app.utils.token_revocation import mark_user_tokens_revoked
+from app.utils.decorators import user_required
 from app.common.photo import detect_misbehavior_result
 from . import user
 
@@ -158,7 +159,7 @@ def login():
 
 # 用户修改个人信息接口
 @user.route('/profile', methods=['PUT'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def update_profile():
     try:
         # 标记本次请求是否修改了密码，用于提交后撤销旧令牌
@@ -214,7 +215,7 @@ def update_profile():
 
 # 获取用户信息接口
 @user.route('/profile', methods=['GET'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def get_profile():
     try:
         # 获取当前用户ID
@@ -268,7 +269,9 @@ def get_user_by_id(user_id):
 
 # 用户修改头像接口
 @user.route('/avatar', methods=['PUT'])
-@jwt_required()  # 需要用户登录
+# 腾讯云内容检测按次计费，不加限流会被刷出真金白银的账单（与注册同策略）
+@ip_rate_limit('user_avatar', 10, 60)
+@user_required  # 需要用户登录
 def update_avatar():
     try:
         # 获取当前用户ID
@@ -291,20 +294,23 @@ def update_avatar():
         if not isinstance(avatar_url, str) or len(avatar_url) > 200:
             return jsonify({"error": "头像地址需为长度不超过200的字符串"}), 400
 
-        # 调用不良内容检测
-        try:
-            result = detect_misbehavior_result(avatar_url)
-        except ValueError as e:
-            # 图片地址无效（SSRF 白名单拒绝等）属于请求问题，返回 400
-            current_app.logger.warning(f"头像地址无效: {str(e)}")
-            return jsonify({"error": str(e)}), 400
-        except Exception as e:
-            current_app.logger.error(f"检查不良内容失败: {str(e)}")
-            return jsonify({"error": "检查不良内容失败"}), 500
+        # URL 未变跳过检测：内容检测按次计费，重复提交同一地址无需再次付费
+        # （对照超管端 update_user 的防重入写法）
+        if avatar_url != user.avatar_url:
+            # 调用不良内容检测
+            try:
+                result = detect_misbehavior_result(avatar_url)
+            except ValueError as e:
+                # 图片地址无效（SSRF 白名单拒绝等）属于请求问题，返回 400
+                current_app.logger.warning(f"头像地址无效: {str(e)}")
+                return jsonify({"error": str(e)}), 400
+            except Exception as e:
+                current_app.logger.error(f"检查不良内容失败: {str(e)}")
+                return jsonify({"error": "检查不良内容失败"}), 500
 
-        if result.get('Type') != '正常':
-            current_app.logger.warning("检测到不良内容，头像无法使用")
-            return jsonify({"error": "检测到不良内容，头像无法使用"}), 400
+            if result.get('Type') != '正常':
+                current_app.logger.warning("检测到不良内容，头像无法使用")
+                return jsonify({"error": "检测到不良内容，头像无法使用"}), 400
 
         # 更新用户头像
         user.avatar_url = avatar_url
@@ -322,7 +328,7 @@ def update_avatar():
 
 # 用户修改邮箱接口
 @user.route('/email', methods=['POST'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def change_email():
     try:
         # 从请求中获取JSON数据

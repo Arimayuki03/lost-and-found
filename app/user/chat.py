@@ -1,11 +1,12 @@
 import traceback
 from datetime import datetime, timezone
 from flask import request, jsonify, current_app, session
-from flask_jwt_extended import jwt_required, get_jwt_identity, decode_token
-from flask_socketio import emit, join_room, leave_room, disconnect
+from flask_jwt_extended import get_jwt_identity, decode_token
+from flask_socketio import emit, join_room, leave_room
 from sqlalchemy import text, or_, func, case
 from app import db, socketio
 from app.models import ChatMessage, User
+from app.utils.decorators import user_required
 from . import user
 from functools import wraps
 
@@ -110,7 +111,7 @@ def handle_connect():
         return True  # 仍然允许连接
 
 
-# 处理断开连接事件
+# 处理断开连接事件（由客户端真正断开时触发；服务器不再主动 disconnect）
 @socketio.on('disconnect')
 def handle_disconnect():
     try:
@@ -263,7 +264,8 @@ def on_leave_private_chat(data):
             'status': 'offline',
             'timestamp': datetime.now(timezone.utc).isoformat()
         }, room=room)
-        disconnect()
+        # 只做房间离开，不调 disconnect()：前端每次离房（onUnload/onHide）都会触发本事件，
+        # 掐断整条 Socket 连接会导致首页实时推送/未读角标一起失效
         current_app.logger.info(f"用户 {user_id} 已离开私聊房间 {room}")
         return emit('leave_result', {'success': True, 'room': room})
 
@@ -394,7 +396,7 @@ def handle_private_message_read(data):
 
 # 添加HTTP端点用于发送消息
 @user.route('/chat/message', methods=['POST'])
-@jwt_required()
+@user_required  # 需要用户登录
 def send_message():
     try:
         sender_id = get_jwt_identity()
@@ -471,7 +473,7 @@ def send_message():
 
 # 消息历史
 @user.route('/chat/history/<int:receiver_id>', methods=['GET'])
-@jwt_required()
+@user_required  # 需要用户登录
 def get_chat_history(receiver_id):
     try:
         sender_id = get_jwt_identity()
@@ -505,7 +507,7 @@ def get_chat_history(receiver_id):
 
 # 添加标记消息为已读的功能
 @user.route('/chat/mark/<int:message_id>', methods=['POST'])
-@jwt_required()
+@user_required  # 需要用户登录
 def mark_message_read(message_id):
     try:
         user_id = get_jwt_identity()
@@ -536,7 +538,7 @@ def mark_message_read(message_id):
 # 修复：聊天页原先只标记已加载的最近一页（20条），历史里的旧未读永远清不掉，
 # 导致从聊天列表点进会话查看后退出，红点依然存在。
 @user.route('/chat/read/<int:partner_id>', methods=['POST'])
-@jwt_required()
+@user_required  # 需要用户登录
 def mark_conversation_read(partner_id):
     try:
         user_id = get_jwt_identity()
@@ -584,7 +586,7 @@ def mark_conversation_read(partner_id):
 
 # 获取未读消息数量
 @user.route('/chat/unread-count', methods=['GET'])
-@jwt_required()
+@user_required  # 需要用户登录
 def get_unread_count():
     try:
         user_id = get_jwt_identity()
@@ -618,7 +620,7 @@ def get_unread_count():
 
 # 查询当前用户与哪些用户聊过天
 @user.route('/chat/contacts', methods=['GET'])
-@jwt_required()
+@user_required  # 需要用户登录
 def get_chat_contacts():
     try:
         current_user_id = get_jwt_identity()

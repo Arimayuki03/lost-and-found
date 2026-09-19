@@ -6,6 +6,7 @@ import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import current_app
+from sqlalchemy import or_
 import difflib
 import re
 import traceback
@@ -98,11 +99,15 @@ def match_items():
     try:
         current_app.logger.info("开始匹配失物和拾物...")
 
-        # 获取所有已审核未完成的物品
-        lost_items = LostItem.query.filter(LostItem.is_completed == False,
-                                           LostItem.is_under_review == False).all()
-        found_items = FoundItem.query.filter(FoundItem.is_completed == False,
-                                             FoundItem.is_under_review == False).all()
+        # 获取所有已审核未完成的物品。
+        # lost_item.is_completed 为 NOT NULL，is_(False) 与原等值比较行为一致；
+        # found_item.is_completed 允许 NULL（DDL：tinyint DEFAULT NULL，表示未定），
+        # 仅做等值 False 比较会把 NULL 行一并排除，导致未完结的拾物永远不进入匹配，故需 or_ 补上 NULL
+        lost_items = LostItem.query.filter(LostItem.is_completed.is_(False),
+                                           LostItem.is_under_review.is_(False)).all()
+        found_items = FoundItem.query.filter(or_(FoundItem.is_completed.is_(False),
+                                                 FoundItem.is_completed.is_(None)),
+                                             FoundItem.is_under_review.is_(False)).all()
 
         if not lost_items or not found_items:
             current_app.logger.info(f"没有可匹配的物品。失物：{len(lost_items)}，拾物：{len(found_items)}")

@@ -29,6 +29,10 @@ def admin_login():
     # 检查是否提供了学生ID和密码
     if not student_id or not password:
         return jsonify({"error": "需要提供学生ID和密码"}), 400
+    # 类型/长度防护：非字符串会在 Redis 锁键与哈希校验处产生 500
+    if not isinstance(student_id, str) or len(student_id) > 64 \
+            or not isinstance(password, str) or len(password) > 128:
+        return jsonify({"error": "学号或密码格式不正确"}), 400
 
     # 账号级锁定：连续失败达阈值后暂时禁止该学号登录
     # surface=admin：与用户端隔离——管理员在 users 表中也是用户（学号相同），

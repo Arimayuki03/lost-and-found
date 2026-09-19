@@ -3,10 +3,13 @@ from flask import request, jsonify, current_app
 from app.models import LostItem, FoundItem
 from sqlalchemy.exc import SQLAlchemyError
 from app.utils.page import escape_like
+from app.utils.ratelimit import ip_rate_limit
 
 
 # 搜索接口，根据关键词搜索物品
 @common.route('/search', methods=['GET'])
+# 匿名端点且为双 LIKE UNION 全表扫描（cost 高），按 IP 限流防慢查询刷库
+@ip_rate_limit('common_search', 30, 60)
 def search_items():
     try:
         # 获取查询参数（限制分页范围）

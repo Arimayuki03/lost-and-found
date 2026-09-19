@@ -55,6 +55,15 @@ def create_app():
 
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):
+        # 登出撤销：先查 jti 拉黑集合（对包括超管在内的所有令牌生效）。
+        # 拉黑集合的 TTL 只到令牌自然过期，不会影响之后签发的新令牌
+        try:
+            jti = jwt_payload.get('jti')
+            if jti and redis_client.get(f"revoked_jti:{jti}"):
+                return True
+        except Exception as e:
+            app.logger.error(f"令牌撤销检查失败（Redis 异常，放行以免全站不可用）: {str(e)}")
+            return False
         # 密码修改/重置后撤销旧令牌：令牌签发时间（iat）早于密码变更时间即拒绝。
         # 超管令牌不做此检查：其 identity 是 super_admins 表 ID，与用户表共用数字空间
         try:

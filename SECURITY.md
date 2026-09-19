@@ -44,8 +44,10 @@
 
 供安全研究者参考，代码中的关键安全机制：
 
-- JWT 双令牌（access 15 分钟 / refresh 30 天），密码修改后旧令牌自动撤销（`app/utils/token_revocation.py`）；
-- 登录失败锁定（三入口独立计数，`app/utils/account_lock.py`）与 Redis 接口限流（`app/utils/ratelimit.py`）；
+- JWT 双令牌（access 15 分钟 / refresh 30 天），密码修改后旧令牌按签发时间自动撤销，登出按 jti 拉黑立即失效（含超管令牌，`app/utils/token_revocation.py`）；
+- 用户端接口统一 `user_required` 装饰器：拒绝超管 role claim 的令牌穿越，并校验 User 存在（`app/utils/decorators.py`）；
+- 登录失败锁定（三入口独立计数，`app/utils/account_lock.py`）与 Redis 接口限流（登录/检查/公开列表/搜索/头像等端点，`app/utils/ratelimit.py`）；
+- 管理端/超管端登录入参类型与长度校验，杜绝非字符串密码触发的 500；
 - 密码 werkzeug 哈希存储，历史明文登录时自动升级（`app/utils/password.py`）；
-- 日志 SQL 绑定参数脱敏（`app/utils/log_sanitize.py`）；
-- 上传图片不良内容检测（腾讯云 TIIA）与体积/格式限制。
+- 日志 SQL 绑定参数脱敏（`app/utils/log_sanitize.py`），且用户端物品更新接口不再记录完整请求体；
+- 上传图片不良内容检测（腾讯云 TIIA）与体积/格式限制；头像检测带"URL 未变跳过"防重入，避免付费配额被脚本化消耗。

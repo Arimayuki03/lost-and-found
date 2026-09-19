@@ -3,10 +3,13 @@ from flask import request, jsonify, current_app
 from app.models import CarouselImage
 from sqlalchemy.exc import SQLAlchemyError
 from app.utils.page import paginate_query
+from app.utils.ratelimit import ip_rate_limit
 
 
 # 获取所有轮播图接口
 @common.route('/carousel-images', methods=['GET'])
+# 匿名公开列表端点：按 IP 限流防批量抓取
+@ip_rate_limit('common_list', 60, 60)
 def get_carousel_images():
     try:
         # 获取查询参数
@@ -52,6 +55,8 @@ def get_carousel_images():
 
 # 获取单个轮播图接口
 @common.route('/carousel-images/<int:image_id>', methods=['GET'])
+# 匿名公开详情端点：单行查询成本低于列表，限流放宽
+@ip_rate_limit('common_detail', 120, 60)
 def get_carousel_image(image_id):
     try:
         # 查询指定ID的轮播图

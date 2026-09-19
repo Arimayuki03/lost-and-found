@@ -79,10 +79,26 @@ def get_all_unreviewed_lost_items():
         size = request.args.get('size', 10, type=int)
         sort_by = request.args.get('sort_by', 'id')
         sort_order = request.args.get('sort_order', 'desc')
+        keyword = request.args.get('keyword', '')
+
+        # 构建未审核失物的基础查询
+        unreviewed_query = LostItem.query.filter_by(is_under_review=True)
+
+        # 应用关键词搜索（与普通列表端点一致：名称/类别/地点/联系方式模糊匹配，有值才过滤）
+        if keyword:
+            from sqlalchemy import or_
+            unreviewed_query = unreviewed_query.filter(
+                or_(
+                    LostItem.name.like(f"%{escape_like(keyword)}%"),
+                    LostItem.category.like(f"%{escape_like(keyword)}%"),
+                    LostItem.location.like(f"%{escape_like(keyword)}%"),
+                    LostItem.contact.like(f"%{escape_like(keyword)}%")
+                )
+            )
 
         # 查询所有未审核的失物记录，应用分页和排序
         result = paginate_query(
-            LostItem.query.filter_by(is_under_review=True),
+            unreviewed_query,
             default_page=page,
             default_size=size,
             sortable_fields=['id', 'name', 'category', 'location',
@@ -130,6 +146,7 @@ def sift_lost_items():
         location = request.args.get('location')
         is_completed = request.args.get('is_completed')
         user_id = request.args.get('user_id')
+        keyword = request.args.get('keyword')
 
         # 获取时间范围参数
         lost_time_start = request.args.get('lost_time_start')
@@ -160,6 +177,18 @@ def sift_lost_items():
             query = query.filter(LostItem.location.like(f"%{escape_like(location)}%"))
         if user_id:
             query = query.filter(LostItem.user_id == int(user_id))
+
+        # 处理关键词筛选（可选参数：名称/类别/地点/联系方式模糊匹配，不传不过滤）
+        if keyword:
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    LostItem.name.like(f"%{escape_like(keyword)}%"),
+                    LostItem.category.like(f"%{escape_like(keyword)}%"),
+                    LostItem.location.like(f"%{escape_like(keyword)}%"),
+                    LostItem.contact.like(f"%{escape_like(keyword)}%")
+                )
+            )
 
         # 处理 is_completed 参数
         if is_completed is not None:

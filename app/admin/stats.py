@@ -65,6 +65,27 @@ def get_time_range_filter(time_range, time_field):
         return True
 
 
+def build_calendar_month_buckets(now, months=12):
+    """构建最近 months 个日历月的分桶标签（纯函数，便于单测）。
+
+    原实现按 `now - timedelta(days=i*30)` 回退，月份天数不一（28/30/31 天）时
+    同一月份会出现两个桶（如 2026-03-31 起算会同时生成 2026-03 与 2026-04 之外的
+    重复 2026-02/2026-03 标签），后一个空桶覆盖前一个已填计数的桶。
+    改为日历月算法：从"当前月"逐月回退，固定生成 months 个不重复的 YYYY-MM 标签，
+    按时间正序（最旧在前、当前月在最后）返回，与原排序语义一致。
+    """
+    labels = []
+    year, month = now.year, now.month
+    for _ in range(months):
+        labels.append(f"{year}-{month:02d}")
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+    labels.reverse()
+    return labels
+
+
 # 失物统计接口
 @admin.route('/lost-items/stats', methods=['GET'])
 @admin_required
@@ -94,12 +115,9 @@ def get_lost_items_stats():
             func.count(LostItem.id).label('count')
         ).filter(time_filter).group_by('year', 'month').order_by('year', 'month').all()
 
-        # 创建过去12个月的月份列表
-        month_stats = []
-        for i in range(11, -1, -1):
-            month_date = datetime.datetime.now() - datetime.timedelta(days=i * 30)
-            month_str = f"{month_date.year}-{month_date.month:02d}"
-            month_stats.append({"month": month_str, "count": 0})
+        # 创建过去12个月的月份列表（日历月分桶，固定12个不重复月份，当前月包含在内且排在最后）
+        month_stats = [{"month": label, "count": 0}
+                       for label in build_calendar_month_buckets(datetime.datetime.now(), months=12)]
 
         # 填充统计数据
         for year, month, count in time_result:
@@ -163,12 +181,9 @@ def get_found_items_stats():
             func.count(FoundItem.id).label('count')
         ).filter(time_filter).group_by('year', 'month').order_by('year', 'month').all()
 
-        # 创建过去12个月的月份列表
-        month_stats = []
-        for i in range(11, -1, -1):
-            month_date = datetime.datetime.now() - datetime.timedelta(days=i * 30)
-            month_str = f"{month_date.year}-{month_date.month:02d}"
-            month_stats.append({"month": month_str, "count": 0})
+        # 创建过去12个月的月份列表（日历月分桶，固定12个不重复月份，当前月包含在内且排在最后）
+        month_stats = [{"month": label, "count": 0}
+                       for label in build_calendar_month_buckets(datetime.datetime.now(), months=12)]
 
         # 填充统计数据
         for year, month, count in time_result:

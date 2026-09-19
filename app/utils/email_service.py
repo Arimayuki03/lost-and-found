@@ -49,14 +49,3 @@ def send_verification_email(to_email):
         "邮箱验证",
         f'您的验证码是: {code}，验证码90秒内有效。'
     )
-
-
-# 发送找回密码验证码邮件，返回是否成功
-def send_password_reset_email(to_email):
-    code = generate_verification_code()
-    redis_client.setex(f"email_verification:{to_email}", 90, code)
-    return _send_code_email(
-        to_email,
-        "找回密码验证",
-        f'您的找回密码验证码是: {code}，验证码90秒内有效。'
-    )

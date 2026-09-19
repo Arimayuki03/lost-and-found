@@ -166,6 +166,17 @@ def delete_user(user_id):
             current_app.logger.warning(f"用户 ID {user_id} 未找到")
             return jsonify({"message": "用户未找到"}), 404
 
+        # 超管不能删除自己：防止误删后失去当前管理身份（identity 与路由参数同为用户 ID）
+        if str(user_id) == str(get_jwt_identity()):
+            current_app.logger.warning(f"超管 ID {get_jwt_identity()} 尝试删除自己，已拒绝")
+            return jsonify({"error": "不能删除自己的账号"}), 400
+
+        # 禁止删除管理员账号：删除后审核/管理入口失守且不可恢复（对照 admins.py 的禁删保护）
+        if user.is_admin:
+            current_app.logger.warning(
+                f"超管 ID {get_jwt_identity()} 尝试删除管理员（用户 ID {user_id}），已拒绝")
+            return jsonify({"error": "不能删除管理员账号"}), 403
+
         # 使用事务确保所有操作要么全部成功，要么全部失败
         with db.session.begin_nested():
             # 获取用户的所有失物和招领物品ID

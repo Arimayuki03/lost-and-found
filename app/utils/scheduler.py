@@ -22,13 +22,18 @@ MINIO_ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY')
 MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY')
 MINIO_BUCKET_NAME = os.getenv('MINIO_BUCKET_NAME')
 
-# 初始化MinIO客户端
-minio_client = Minio(
-    MINIO_ENDPOINT,
-    access_key=MINIO_ACCESS_KEY,
-    secret_key=MINIO_SECRET_KEY,
-    secure=False
-)
+
+def _get_minio_client():
+    """惰性获取 MinIO 客户端：MINIO_ENDPOINT 未配置时返回 None（应用仍可启动，仅清理任务不可用）"""
+    if not MINIO_ENDPOINT:
+        current_app.logger.warning("MINIO_ENDPOINT 未配置，MinIO 功能不可用")
+        return None
+    return Minio(
+        MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=False
+    )
 
 
 # 初始化调度器
@@ -113,6 +118,11 @@ def _url_to_object_name(url):
 def delete_expired_images():
     with flask_app.app_context():  # 添加应用上下文
         try:
+            # MinIO 未配置时客户端不可用：跳过本次清理，不影响应用其他功能
+            client = _get_minio_client()
+            if client is None:
+                return
+
             # 获取数据库中所有图片的 URL（转成 MinIO object_name 再比对）
             lost_item_images = {_url_to_object_name(item.image_url) for item in LostItem.query.all() if
                                 item.image_url}
@@ -130,7 +140,7 @@ def delete_expired_images():
             # 列出MinIO桶中的所有文件
             # 24小时保护期：刚上传、尚未写入数据库的图片（上传与发布之间存在时间窗）不能删
             protection_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-            objects = minio_client.list_objects(MINIO_BUCKET_NAME)
+            objects = client.list_objects(MINIO_BUCKET_NAME)
             for obj in objects:
                 # 检查文件名是否在数据库中
                 if obj.object_name not in all_images:
@@ -139,7 +149,7 @@ def delete_expired_images():
                         continue
                     current_app.logger.info(f"准备删除文件: {obj.object_name}，因为它不在数据库中")
                     # 如果不在数据库中，则删除该文件
-                    minio_client.remove_object(MINIO_BUCKET_NAME, obj.object_name)
+                    client.remove_object(MINIO_BUCKET_NAME, obj.object_name)
                     current_app.logger.info(f"已删除失效图片: {obj.object_name}")
 
         except S3Error as e:

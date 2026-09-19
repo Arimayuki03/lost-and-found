@@ -86,13 +86,23 @@ MINIO_ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY')
 MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY')
 MINIO_BUCKET_NAME = os.getenv('MINIO_BUCKET_NAME')
 
-# 初始化 MinIO 客户端
-minio_client = Minio(
-    MINIO_ENDPOINT,
-    access_key=MINIO_ACCESS_KEY,
-    secret_key=MINIO_SECRET_KEY,
-    secure=False
-)
+
+def _get_minio_client():
+    """惰性获取 MinIO 客户端：MINIO_ENDPOINT 未配置时返回 None（应用仍可导入启动，仅存储功能不可用）"""
+    if not MINIO_ENDPOINT:
+        current_app.logger.warning("MINIO_ENDPOINT 未配置，MinIO 功能不可用")
+        return None
+    return Minio(
+        MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=False
+    )
+
+
+# MINIO 未配置时存储客户端不可用的显式异常（由调用方映射 503）
+class MinioUnavailableError(Exception):
+    pass
 
 
 # 图片打标签接口（调用腾讯云付费 API；需登录 + 按 IP 限流防刷）
@@ -235,6 +245,7 @@ def _validate_and_store_image(file, prefix=''):
 
     仅接受图片文件；PNG 统一转 JPEG；超过 1MB 时逐级降低质量压缩。
     file 缺失/格式无效抛 ValueError（由调用方映射 400），
+    MinIO 未配置抛 MinioUnavailableError（映射 503），
     MinIO/处理错误抛 S3Error/IOError（映射 500）。
     """
     if file is None or file.filename == '':
@@ -248,6 +259,11 @@ def _validate_and_store_image(file, prefix=''):
         raise ValueError("不支持的图片格式")
     # 下方统一重编码为 JPEG 存储，扩展名与实际内容保持一致（避免 .bmp 文件名挂 image/jpeg）
     filename = f"{prefix}{uuid.uuid4()}.jpeg"
+
+    # MinIO 未配置时直接拒绝上传（惰性初始化：客户端为 None 说明存储服务不可用）
+    minio_client = _get_minio_client()
+    if minio_client is None:
+        raise MinioUnavailableError("文件存储服务不可用，请稍后再试")
 
     # 使用Pillow压缩图像
     try:
@@ -310,6 +326,9 @@ def upload_file():
     except ValueError as e:
         current_app.logger.warning(f"上传参数无效: {str(e)}")
         return jsonify({"error": str(e)}), 400
+    except MinioUnavailableError as e:
+        current_app.logger.error(f"文件上传失败（MinIO 未配置）: {str(e)}")
+        return jsonify({"error": str(e)}), 503
     except S3Error as e:
         current_app.logger.error(f"文件上传失败: {str(e)}")
         return jsonify({"error": "文件上传失败"}), 500
@@ -330,6 +349,9 @@ def upload_avatar_anonymous():
         file_url = _validate_and_store_image(request.files.get('file'), prefix='avatars/')
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except MinioUnavailableError as e:
+        current_app.logger.error(f"头像上传失败（MinIO 未配置）: {str(e)}")
+        return jsonify({"error": str(e)}), 503
     except S3Error as e:
         current_app.logger.error(f"头像上传失败: {str(e)}")
         return jsonify({"error": "文件上传失败"}), 500

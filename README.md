@@ -126,14 +126,14 @@ lost_and_found/
 │   └── utils/                # 工具与服务
 │       ├── matching_service.py   # 失物-拾物匹配算法 + 匹配邮件通知
 │       ├── scheduler.py          # APScheduler 定时任务、MinIO 失效图片清理
-│       ├── email_service.py      # 验证码/找回密码邮件
+│       ├── email_service.py      # 验证码邮件
 │       ├── code.py               # 验证码校验逻辑（Redis）
 │       ├── redis_client.py       # Redis 客户端
-│       ├── decorators.py         # admin_required / super_admin_required
+│       ├── decorators.py         # admin_required / user_required / super_admin_required
 │       ├── page.py               # 通用分页/排序
 │       ├── ratelimit.py          # 基于 Redis 的接口限流
 │       ├── account_lock.py       # 登录失败账号锁定（按登录面独立计数）
-│       ├── token_revocation.py   # 密码变更后的旧令牌撤销
+│       ├── token_revocation.py   # 旧令牌撤销（密码变更时间戳 + 登出 jti 拉黑）
 │       ├── log_sanitize.py       # 日志敏感参数（SQL 绑定参数）脱敏
 │       └── password.py           # 密码哈希
 ├── lost_and_found.sql        # 建库脚本
@@ -179,6 +179,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 | POST | `/common/emails` · `/student-ids` | 检查邮箱 / 学号是否已被注册 |
 | POST | `/common/emails/verification` | 发送邮箱验证码（Redis 90 秒有效） |
 | POST | `/common/refresh` | 刷新 access token |
+| POST | `/common/logout` | 登出并撤销当前令牌（可选携带 refresh_token 一并撤销） |
 | POST | `/common/images/upload` · `/images/upload-avatar` | 上传图片 / 头像（压缩后存入 MinIO，返回 URL） |
 | POST | `/common/images/labels` | 腾讯云图像打标签（返回一二级类别） |
 | POST | `/common/images/inappropriate-content` | 不良内容检测（注册/换头像时调用） |
@@ -191,7 +192,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 | POST | `/user/login` | 登录，返回 access/refresh token 与用户信息 |
 | GET / PUT | `/user/profile` | 获取 / 修改个人信息（JWT） |
 | GET | `/user/profile/<user_id>` | 查看他人公开信息（昵称、头像） |
-| PUT | `/user/avatar` | 修改头像（含不良内容检测） |
+| PUT | `/user/avatar` | 修改头像（含不良内容检测；URL 未变跳过检测，IP 限流 10 次/分钟） |
 | POST | `/user/email` · `/user/password` | 修改邮箱（需新邮箱验证码）/ 重置密码（邮箱验证码） |
 | POST / PUT / DELETE | `/user/lost-items[/<id>]` | 发布 / 修改 / 删除失物 |
 | GET | `/user/lost-items` · `/<id>/detail` | 我的失物列表 / 详情 |
@@ -301,10 +302,19 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 
 - 密码使用 werkzeug 哈希存储（详见 `app/utils/password.py`）；数据库中的历史明文密码会在该用户下次登录成功时自动升级为哈希。
 - 登录安全：连续失败 5 次锁定账号 15 分钟（用户端/管理端/超管端独立计数，见 `app/utils/account_lock.py`），并配有基于 Redis 的 IP 限流（`app/utils/ratelimit.py`）。
-- 令牌安全：修改密码后签发时间早于变更时刻的旧令牌自动失效（见 `app/utils/token_revocation.py`）；日志中的 SQL 绑定参数已统一脱敏（`app/utils/log_sanitize.py`）。
+- 令牌安全：修改密码后签发时间早于变更时刻的旧令牌自动失效；登出时当前令牌按 jti 拉黑立即失效，超管令牌同样受登出撤销约束（见 `app/utils/token_revocation.py`）；用户端接口按 `user_required` 校验 role claim，拒绝超管令牌穿越；日志中的 SQL 绑定参数已统一脱敏（`app/utils/log_sanitize.py`）。
 - Werkzeug 调试器默认关闭（安全考虑，`0.0.0.0` 上开启等同于远程代码执行入口）；本机临时调试时以 `FLASK_DEBUG=1` 启动。
 - 本地开发可用 `docker compose up -d` 一键启动 MinIO（9000/9001）与 Redis（6379）；MinIO/Redis 端口仅绑定 `127.0.0.1`，生产部署请按需调整并配置 `REDIS_PASSWORD`。
 - 日志写入 `logs/` 目录（10MB 轮转）；`logs/`、`migrations`、`.env` 均已在 `.gitignore` 中忽略。
+
+## 测试
+
+```bash
+.venv\Scripts\python.exe tests/test_smoke.py   # Windows
+python tests/test_smoke.py                       # Linux / macOS
+```
+
+冒烟测试使用 SQLite 内存库与 Redis fail-open 降级，无需真实 MySQL/Redis/MinIO 即可运行，覆盖鉴权穿越、登录类型校验、登出撤销、统计分桶、匹配过滤、限流装饰器等关键回归（18 项断言）。
 
 ## License
 

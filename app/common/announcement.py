@@ -3,10 +3,13 @@ from flask import request, jsonify, current_app
 from app.models import Announcement
 from sqlalchemy.exc import SQLAlchemyError
 from app.utils.page import escape_like
+from app.utils.ratelimit import ip_rate_limit
 
 
 # 获取所有公告接口 - 不使用分页
 @common.route('/announcements', methods=['GET'])
+# 匿名公开列表端点：无分页全量返回，按 IP 限流防批量抓取
+@ip_rate_limit('common_list', 60, 60)
 def get_announcements():
     try:
         # 获取查询参数
@@ -66,6 +69,8 @@ def get_announcements():
 
 # 获取单个公告接口
 @common.route('/announcements/<int:announcement_id>', methods=['GET'])
+# 匿名公开详情端点：单行查询成本低于列表，限流放宽
+@ip_rate_limit('common_detail', 120, 60)
 def get_announcement(announcement_id):
     try:
         # 查询指定ID的公告

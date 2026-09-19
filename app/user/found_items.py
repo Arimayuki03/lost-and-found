@@ -2,16 +2,17 @@ from datetime import datetime
 
 from . import user
 from flask import request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError
 from app import db
 from app.models import FoundItem, ItemMatch
+from app.utils.decorators import user_required
 from app.utils.page import paginate_query, validate_str
 
 
 # 用户添加拾物信息接口
 @user.route('/found-items', methods=['POST'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def create_found_item():
     try:
         # 从请求中获取JSON数据（silent=True，非法JSON时返回None而不是抛异常）
@@ -72,7 +73,7 @@ def create_found_item():
 
 # 用户修改拾物信息接口
 @user.route('/found-items/<int:item_id>', methods=['PUT'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def update_found_item(item_id):
     try:
         # 从请求中获取JSON数据（silent=True，非法JSON时返回None而不是抛异常）
@@ -120,7 +121,9 @@ def update_found_item(item_id):
 
         # 检查是否只是更新完成状态
         is_status_update_only = len(data) == 1 and 'is_completed' in data
-        current_app.logger.info(f"请求数据: {data}, 是否仅更新状态: {is_status_update_only}")
+        # 仅记录请求摘要，不落整个 body（可能含联系方式等 PII，与 log_sanitize 脱敏意图一致）
+        current_app.logger.info(
+            f"用户 {current_user} 提交了拾物更新请求（字段数 {len(data)}），是否仅更新状态: {is_status_update_only}")
 
         # 如果物品正在审核中，且请求仅是更改完成状态，则拒绝请求
         if is_status_update_only and original_is_under_review:
@@ -180,7 +183,7 @@ def update_found_item(item_id):
 
 # 用户删除拾物信息接口
 @user.route('/found-items/<int:item_id>', methods=['DELETE'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def delete_found_item(item_id):
     try:
         # 获取当前用户ID
@@ -227,7 +230,7 @@ def delete_found_item(item_id):
 
 # 查询当前用户的所有拾物信息接口
 @user.route('/found-items', methods=['GET'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def get_my_found_items():
     try:
         # 获取当前用户ID
@@ -272,7 +275,7 @@ def get_my_found_items():
 
 # 用户查询自己的单个拾物详情接口（包括正在审核的记录）
 @user.route('/found-items/<int:item_id>/detail', methods=['GET'])
-@jwt_required()  # 需要用户登录
+@user_required  # 需要用户登录
 def get_my_found_item_detail(item_id):
     try:
         # 获取当前用户ID
