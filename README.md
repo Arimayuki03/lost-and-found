@@ -27,9 +27,9 @@
 
 | 仓库 | 说明 | 默认端口 |
 | --- | --- | --- |
-| [lost_and_found](https://github.com/Arimayuki03/lost_and_found) | **本项目**：Flask 后端（API、Socket.IO、匹配算法、邮件通知） | 5000 |
-| [lost_and_found_user](https://github.com/Arimayuki03/lost_and_found_user) | 用户端前端（uni-app Vue3，H5 / 微信小程序 / App） | 5173（CLI H5） |
-| [lost_and_found_admin](https://github.com/Arimayuki03/lost_and_found_admin) | 管理后台前端（Vue 3 + Element Plus） | 8001 |
+| [lost-and-found](https://github.com/Arimayuki03/lost_and_found) | **本项目**：Flask 后端（API、Socket.IO、匹配算法、邮件通知） | 5000 |
+| [lost-and-found-user](https://github.com/Arimayuki03/lost_and_found_user) | 用户端前端（uni-app Vue3，H5 / 微信小程序 / App） | 5173（CLI H5） |
+| [lost-and-found-admin](https://github.com/Arimayuki03/lost_and_found_admin) | 管理后台前端（Vue 3 + Element Plus） | 8001 |
 
 ## ✨ 功能特性
 
@@ -69,7 +69,7 @@
 ```bash
 # 克隆仓库
 git clone https://github.com/Arimayuki03/lost_and_found.git
-cd lost_and_found
+cd lost-and-found
 
 # 创建虚拟环境
 python -m venv .venv
