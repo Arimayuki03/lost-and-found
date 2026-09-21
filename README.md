@@ -1,19 +1,48 @@
-# 校园失物招领平台（后端）
+<div align="center">
 
-基于 Flask 的校园失物招领平台后端服务。用户可以发布失物（丢失物品）和拾物（捡到的物品）信息，系统通过相似度算法自动匹配置物与失主，并通过邮件通知双方；同时提供实时私信、物品审核、公告轮播图管理、数据统计等完整功能。
+# 🎒 校园失物招领平台 · 后端
 
-## 功能特性
+**基于 Flask 3 的校园失物招领平台后端服务**
 
-- **失物/拾物发布与管理**：发布、修改、删除、查询自己的失物与拾物信息，支持图片上传（自动压缩）；
-- **自动匹配与邮件通知**：定时任务周期性对失物与拾物做多维度加权相似度匹配，匹配成功自动发送邮件通知双方；
-- **先审核后展示**：新发布物品进入待审核状态，管理员审核通过后才在公共列表展示并参与匹配；
-- **实时私信**：基于 Flask-SocketIO 的点对点私聊，支持未读计数、已读回执、在线状态；
-- **三类角色权限体系**：普通用户 / 管理员 / 超级管理员，独立的登录入口与权限装饰器；
-- **内容安全**：接入腾讯云 TIIA 进行图像打标签与不良内容检测（注册头像、物品图片）；
-- **安全加固**：JWT 双令牌认证、密码修改后旧令牌自动撤销、登录失败账号锁定、IP 限流、日志敏感参数脱敏；
-- **运营支撑**：公告、首页轮播图、意见反馈、平台数据统计。
+失物/拾物发布 · 智能匹配与邮件通知 · 实时私信 · 审核工作流 · 完善的安全加固
 
-## 技术栈
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Flask](https://img.shields.io/badge/Flask-3.1-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
+[![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![MinIO](https://img.shields.io/badge/MinIO-C72E49?logo=minio&logoColor=white)](https://min.io/)
+[![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?logo=socketdotio&logoColor=white)](https://flask-socketio.readthedocs.io/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/tag/Arimayuki03/lost_and_found?label=Release)](../../releases)
+
+</div>
+
+---
+
+## 📖 简介
+
+用户可以发布失物（丢失物品）和拾物（捡到的物品）信息，系统通过相似度算法自动匹配置物与失主，并通过邮件通知双方；同时提供实时私信、物品审核、公告轮播图管理、数据统计等完整功能。
+
+## 📦 相关仓库
+
+| 仓库 | 说明 | 默认端口 |
+| --- | --- | --- |
+| [lost_and_found](https://github.com/Arimayuki03/lost_and_found) | **本项目**：Flask 后端（API、Socket.IO、匹配算法、邮件通知） | 5000 |
+| [lost_and_found_user](https://github.com/Arimayuki03/lost_and_found_user) | 用户端前端（uni-app Vue3，H5 / 微信小程序 / App） | — |
+| [lost_and_found_admin](https://github.com/Arimayuki03/lost_and_found_admin) | 管理后台前端（Vue 3 + Element Plus） | 8001 |
+
+## ✨ 功能特性
+
+- 📝 **失物/拾物发布与管理**：发布、修改、删除、查询自己的失物与拾物信息，支持图片上传（自动压缩）；
+- 🤝 **自动匹配与邮件通知**：定时任务周期性对失物与拾物做多维度加权相似度匹配，匹配成功自动发送邮件通知双方；
+- 🛡️ **先审核后展示**：新发布物品进入待审核状态，管理员审核通过后才在公共列表展示并参与匹配；
+- 💬 **实时私信**：基于 Flask-SocketIO 的点对点私聊，支持未读计数、已读回执、在线状态；
+- 👥 **三类角色权限体系**：普通用户 / 管理员 / 超级管理员，独立的登录入口与权限装饰器；
+- 🧷 **内容安全**：接入腾讯云 TIIA 进行图像打标签与不良内容检测（注册头像、物品图片）；
+- 🔐 **安全加固**：JWT 双令牌认证、密码修改后旧令牌自动撤销、登录失败账号锁定、IP 限流、日志敏感参数脱敏；
+- 🏢 **运营支撑**：公告、首页轮播图、意见反馈、平台数据统计。
+
+## 🧰 技术栈
 
 | 类别 | 技术 |
 | --- | --- |
@@ -27,13 +56,22 @@
 | 图像处理 | Pillow 12.3.0（上传压缩，PNG 转 JPEG，质量自适应降到 1MB 以内） |
 | 其他 | Flask-Cors 4.0.1、python-dotenv 1.0.1、requests 2.32.3、Werkzeug 3.1.3 |
 
-## 快速开始
+## 🚀 快速开始
+
+### 环境要求
+
+- Python 3.10+
+- MySQL 8.0（本地服务或远程实例）
+- Docker（用于一键启动 MinIO 与 Redis）
 
 ### 1. 安装依赖
 
-需要 Python 3.10+ 与本地 MySQL、Docker（用于启动 MinIO 与 Redis）。
-
 ```bash
+# 克隆仓库
+git clone https://github.com/Arimayuki03/lost_and_found.git
+cd lost_and_found
+
+# 创建虚拟环境
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
@@ -51,7 +89,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-各变量含义见下方[环境变量说明](#环境变量说明)。`.env` 已被 `.gitignore` 忽略，切勿提交真实密钥。
+各变量含义见下方[环境变量说明](#️-环境变量说明)。`.env` 已被 `.gitignore` 忽略，切勿提交真实密钥。
 
 ### 3. 启动 MinIO 与 Redis
 
@@ -86,9 +124,18 @@ python run.py
 - 启动 APScheduler 定时任务；
 - 根据环境变量自动创建超级管理员账号（已存在则跳过）。
 
-## 项目结构
+### 6. 运行测试
 
+```bash
+.venv\Scripts\python.exe tests/test_smoke.py   # Windows
+python tests/test_smoke.py                       # Linux / macOS
 ```
+
+冒烟测试使用 SQLite 内存库与 Redis fail-open 降级，无需真实 MySQL/Redis/MinIO 即可运行，覆盖鉴权穿越、登录类型校验、登出撤销、统计分桶、匹配过滤、限流装饰器等关键回归（18 项断言）。
+
+## 🏗️ 项目结构
+
+```text
 lost_and_found/
 ├── run.py                    # 启动入口（socketio.run，端口 5000）
 ├── config/
@@ -142,7 +189,7 @@ lost_and_found/
 └── requirements.txt          # Python 依赖
 ```
 
-## 角色与权限
+## 🎭 角色与权限
 
 系统有三类角色，通过两个权限装饰器控制访问（`app/utils/decorators.py`）：
 
@@ -154,7 +201,7 @@ lost_and_found/
 
 物品采用**先审核后展示**的流程：新发布的物品 `is_under_review=True`，管理员审核通过（`review`）后才出现在公共列表、参与自动匹配；`is_completed` 标记物品是否已完成（找回/归还）。
 
-## API 概览
+## 🌐 API 概览
 
 API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 
@@ -164,8 +211,6 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 | 用户端 | `/user` | 注册登录、个人信息、失物/拾物管理、实时私信、意见反馈 | JWT |
 | 管理端 | `/admin` | 物品审核、用户管理、匹配触发、统计、公告/轮播图/反馈管理 | 管理员 JWT |
 | 超管端 | `/sadmin` | 超管登录、管理员增删查、用户管理、用户统计 | 超管 JWT |
-
-主要端点一览：
 
 ### 公共接口 `/common`（无需登录）
 
@@ -231,7 +276,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 | GET | `/sadmin/users` · `/sadmin/users/stats` | 用户列表（分页）/ 用户统计 |
 | PUT / DELETE | `/sadmin/users/<id>` | 修改 / 删除用户 |
 
-## 实时私信（Socket.IO）
+## 💬 实时私信（Socket.IO）
 
 连接地址 `ws://<host>:5000`，支持三种认证方式：连接时 URL 参数 `?token=<access_token>`、`authenticate` 事件、或在事件数据中携带 `token` / `authorization` 字段。私聊房间命名格式为 `chat:<小ID>-<大ID>`（双方用户 ID 排序拼接）。
 
@@ -251,7 +296,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 | `user_status_change` | 房间成员上线/下线 |
 | `join_private_chat_result` / `authenticate_result` / `error` | 各类操作结果与错误 |
 
-## 定时任务（APScheduler）
+## ⏰ 定时任务（APScheduler）
 
 | 任务 | 周期 | 说明 |
 | --- | --- | --- |
@@ -260,7 +305,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 
 管理员也可通过 `POST /admin/run` 手动触发一次匹配。
 
-## 匹配算法
+## 🎯 匹配算法
 
 `app/utils/matching_service.py` 基于 `difflib.SequenceMatcher` 实现多维度加权相似度匹配，只处理**已审核且未完成**的物品，并跳过已有匹配记录的对：
 
@@ -275,7 +320,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 
 匹配成功后向失物用户发送「您的失物可能已被找到」、向拾物用户发送「您拾到的物品可能已找到失主」的 HTML 邮件，包含双方物品信息、各维度相似度百分比与联系方式，并将匹配记录标记为已通知。
 
-## 环境变量说明
+## ⚙️ 环境变量说明
 
 与 `.env.example` 保持一致，复制后填入实际值：
 
@@ -298,7 +343,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 | `TRUST_PROXY_HEADERS` | 否 | 仅当部署在可信反向代理之后设为 `1`，限流取真实 IP |
 | `CORS_ORIGINS` | 否 | CORS 白名单，逗号分隔；留空或 `*` 回退为 `*`，仅限本地开发，生产必须收敛为实际前端域名 |
 
-## 注意事项
+## 🔒 安全与注意事项
 
 - 密码使用 werkzeug 哈希存储（详见 `app/utils/password.py`）；数据库中的历史明文密码会在该用户下次登录成功时自动升级为哈希。
 - 登录安全：连续失败 5 次锁定账号 15 分钟（用户端/管理端/超管端独立计数，见 `app/utils/account_lock.py`），并配有基于 Redis 的 IP 限流（`app/utils/ratelimit.py`）。
@@ -307,15 +352,10 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 - 本地开发可用 `docker compose up -d` 一键启动 MinIO（9000/9001）与 Redis（6379）；MinIO/Redis 端口仅绑定 `127.0.0.1`，生产部署请按需调整并配置 `REDIS_PASSWORD`。
 - 日志写入 `logs/` 目录（10MB 轮转）；`logs/`、`migrations`、`.env` 均已在 `.gitignore` 中忽略。
 
-## 测试
+## 🤝 贡献
 
-```bash
-.venv\Scripts\python.exe tests/test_smoke.py   # Windows
-python tests/test_smoke.py                       # Linux / macOS
-```
+欢迎提交 Issue 与 Pull Request！贡献流程与规范请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。安全漏洞请勿公开提交，参见 [SECURITY.md](SECURITY.md)。
 
-冒烟测试使用 SQLite 内存库与 Redis fail-open 降级，无需真实 MySQL/Redis/MinIO 即可运行，覆盖鉴权穿越、登录类型校验、登出撤销、统计分桶、匹配过滤、限流装饰器等关键回归（18 项断言）。
+## 📄 License
 
-## License
-
-本项目基于 [MIT License](LICENSE) 开源。
+[MIT](LICENSE) © 2026-Present Arimayuki03
