@@ -13,7 +13,7 @@
 [![MinIO](https://img.shields.io/badge/MinIO-C72E49?logo=minio&logoColor=white)](https://min.io/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?logo=socketdotio&logoColor=white)](https://flask-socketio.readthedocs.io/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/tag/Arimayuki03/lost_and_found?label=Release)](../../releases)
+[![Release](https://img.shields.io/github/v/release/Arimayuki03/lost_and_found?label=Release)](../../releases)
 
 </div>
 
@@ -28,7 +28,7 @@
 | 仓库 | 说明 | 默认端口 |
 | --- | --- | --- |
 | [lost_and_found](https://github.com/Arimayuki03/lost_and_found) | **本项目**：Flask 后端（API、Socket.IO、匹配算法、邮件通知） | 5000 |
-| [lost_and_found_user](https://github.com/Arimayuki03/lost_and_found_user) | 用户端前端（uni-app Vue3，H5 / 微信小程序 / App） | — |
+| [lost_and_found_user](https://github.com/Arimayuki03/lost_and_found_user) | 用户端前端（uni-app Vue3，H5 / 微信小程序 / App） | 5173（CLI H5） |
 | [lost_and_found_admin](https://github.com/Arimayuki03/lost_and_found_admin) | 管理后台前端（Vue 3 + Element Plus） | 8001 |
 
 ## ✨ 功能特性
@@ -218,7 +218,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 | --- | --- | --- |
 | GET | `/common/lost-items` · `/sift` · `/<id>` | 已审核失物列表（分页）/ 筛选 / 详情 |
 | GET | `/common/found-items` · `/sift` · `/<id>` | 已审核拾物列表 / 筛选 / 详情 |
-| GET | `/common/search?query=&type=lost\|found` | 按关键词搜索（名称 + 描述） |
+| GET | `/common/search?query=&type=lost 或 found` | 按关键词搜索（名称 + 描述） |
 | GET | `/common/announcements` · `/<id>` | 公告列表 / 详情 |
 | GET | `/common/carousel-images` · `/<id>` | 轮播图列表 / 详情 |
 | POST | `/common/emails` · `/student-ids` | 检查邮箱 / 学号是否已被注册 |
