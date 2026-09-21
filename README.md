@@ -13,7 +13,7 @@
 [![MinIO](https://img.shields.io/badge/MinIO-C72E49?logo=minio&logoColor=white)](https://min.io/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?logo=socketdotio&logoColor=white)](https://flask-socketio.readthedocs.io/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/Arimayuki03/lost_and_found?label=Release)](../../releases)
+[![Release](https://img.shields.io/github/v/release/Arimayuki03/lost-and-found?label=Release)](../../releases)
 
 </div>
 
@@ -27,9 +27,9 @@
 
 | 仓库 | 说明 | 默认端口 |
 | --- | --- | --- |
-| [lost-and-found](https://github.com/Arimayuki03/lost_and_found) | **本项目**：Flask 后端（API、Socket.IO、匹配算法、邮件通知） | 5000 |
-| [lost-and-found-user](https://github.com/Arimayuki03/lost_and_found_user) | 用户端前端（uni-app Vue3，H5 / 微信小程序 / App） | 5173（CLI H5） |
-| [lost-and-found-admin](https://github.com/Arimayuki03/lost_and_found_admin) | 管理后台前端（Vue 3 + Element Plus） | 8001 |
+| [lost-and-found](https://github.com/Arimayuki03/lost-and-found) | **本项目**：Flask 后端（API、Socket.IO、匹配算法、邮件通知） | 5000 |
+| [lost-and-found-user](https://github.com/Arimayuki03/lost-and-found-user) | 用户端前端（uni-app Vue3，H5 / 微信小程序 / App） | 5173（CLI H5） |
+| [lost-and-found-admin](https://github.com/Arimayuki03/lost-and-found-admin) | 管理后台前端（Vue 3 + Element Plus） | 8001 |
 
 ## ✨ 功能特性
 
@@ -68,7 +68,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/Arimayuki03/lost_and_found.git
+git clone https://github.com/Arimayuki03/lost-and-found.git
 cd lost-and-found
 
 # 创建虚拟环境
@@ -136,7 +136,7 @@ python tests/test_smoke.py                       # Linux / macOS
 ## 🏗️ 项目结构
 
 ```text
-lost_and_found/
+lost-and-found/
 ├── run.py                    # 启动入口（socketio.run，端口 5000）
 ├── config/
 │   └── config.py             # 全局配置（读取环境变量）
