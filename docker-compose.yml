@@ -1,6 +1,8 @@
-# 端口仅绑定回环地址（127.0.0.1），避免 MinIO/Redis 直接暴露到公网。
-# 生产部署时 Redis 建议再加 command: redis-server --requirepass <密码>，
-# 并在后端 .env 中配置 REDIS_PASSWORD（后端客户端已支持）。
+# 端口仅绑定回环地址（127.0.0.1），避免 MinIO/Redis/MySQL 直接暴露到公网。
+# Redis 已默认启用 requirepass 密码（可用 REDIS_PASSWORD 覆盖），
+# 后端 .env 的 REDIS_PASSWORD 需使用相同值（config.py 已支持，不配则 Redis 不可用时 fail-open）。
+# MinIO/MySQL 凭据均可通过环境变量覆盖，保留开发默认值。
+# MySQL 已纳入编排（DATABASE_URL 指向 127.0.0.1:3306/lost_and_found）。
 services:
   minio:
     image: minio/minio:latest
@@ -10,8 +12,8 @@ services:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     volumes:
       - minio_data:/data
     restart: unless-stopped
@@ -19,12 +21,33 @@ services:
   redis:
     image: redis:7-alpine
     container_name: lostfound-redis
+    # 默认启用密码 + AOF 持久化；后端 .env 的 REDIS_PASSWORD 需使用相同值
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-lostfound-dev-redis}", "--appendonly", "yes"]
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
 
+  mysql:
+    image: mysql:8.0
+    container_name: lostfound-mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-lostfound-dev-mysql}
+      MYSQL_DATABASE: lost_and_found
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 首次启动可选：将建库脚本挂载到 /docker-entrypoint-initdb.d 自动导入
+      - ./lost_and_found.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    restart: unless-stopped
+
 volumes:
   minio_data:
   redis_data:
+  mysql_data:

@@ -166,10 +166,8 @@ def delete_user(user_id):
             current_app.logger.warning(f"用户 ID {user_id} 未找到")
             return jsonify({"message": "用户未找到"}), 404
 
-        # 超管不能删除自己：防止误删后失去当前管理身份（identity 与路由参数同为用户 ID）
-        if str(user_id) == str(get_jwt_identity()):
-            current_app.logger.warning(f"超管 ID {get_jwt_identity()} 尝试删除自己，已拒绝")
-            return jsonify({"error": "不能删除自己的账号"}), 400
+        # 不做"删除自己"比对：超管 identity 是 super_admins 表 ID，与 user 表 ID 空间独立，
+        # 不存在"删除自己"场景；原比对在两表 ID 撞号时会永久误拒删除同 ID 的普通用户，故移除
 
         # 禁止删除管理员账号：删除后审核/管理入口失守且不可恢复（对照 admins.py 的禁删保护）
         if user.is_admin:

@@ -55,31 +55,10 @@ def create_app():
 
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):
-        # 登出撤销：先查 jti 拉黑集合（对包括超管在内的所有令牌生效）。
-        # 拉黑集合的 TTL 只到令牌自然过期，不会影响之后签发的新令牌
-        try:
-            jti = jwt_payload.get('jti')
-            if jti and redis_client.get(f"revoked_jti:{jti}"):
-                return True
-        except Exception as e:
-            app.logger.error(f"令牌撤销检查失败（Redis 异常，放行以免全站不可用）: {str(e)}")
-            return False
-        # 密码修改/重置后撤销旧令牌：令牌签发时间（iat）早于密码变更时间即拒绝。
-        # 超管令牌不做此检查：其 identity 是 super_admins 表 ID，与用户表共用数字空间
-        try:
-            if jwt_payload.get('role') == 'super_admin':
-                return False
-            changed_at = redis_client.get(f"pwd_changed_at:user:{jwt_payload.get('sub')}")
-        except Exception as e:
-            app.logger.error(f"令牌撤销检查失败（Redis 异常，放行以免全站不可用）: {str(e)}")
-            return False
-        if not changed_at:
-            return False
-        iat = jwt_payload.get('iat')
-        # 用 <= 而非 <：改密同一秒内签发的旧令牌（iat == changed_at）也必须撤销，
-        # 否则"登录后立刻改密"场景下旧 access/refresh token 仍有效（实测可复现）。
-        # 副作用：改密后同一秒内新登录签发的令牌会被误拒，下次请求重新登录即自愈，可接受。
-        return iat is not None and int(iat) <= int(float(changed_at))
+        # 登出撤销 + 密码变更撤销的统一实现抽至 token_revocation.is_token_revoked，
+        # 供 HTTP blocklist 回调与 Socket.IO 事件认证（不经 @jwt_required）共用
+        from app.utils.token_revocation import is_token_revoked
+        return is_token_revoked(jwt_payload)
 
     from app.user import user
     from app.admin import admin

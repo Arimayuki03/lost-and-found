@@ -1,5 +1,7 @@
 import hmac
 
+from flask import current_app
+
 from app.utils import redis_client
 
 # 同一验证码最多允许的校验尝试次数，超过后验证码作废（防 6 位数字码被爆破）
@@ -28,9 +30,16 @@ def verify_email_logic(email, code):
 
     # 检查验证码是否匹配（常量时间比较，避免时序侧信道）
     if not hmac.compare_digest(str(stored_code), str(code)):
-        count = redis_client.incr(attempt_key)
-        if count == 1:
+        try:
+            redis_client.incr(attempt_key)
+            # 无条件重设过期时间：INCR 与 EXPIRE 两步非原子，两步之间异常中断会残留
+            # 永不过期的计数键（5 次尝试上限形同虚设）；每次尝试重设窗口可自愈历史残留键
             redis_client.expire(attempt_key, ATTEMPT_WINDOW_SECONDS)
+        except Exception as e:
+            # fail-closed：无法记录尝试次数时不能放行（否则可无限爆破），记日志后按验证失败处理，
+            # 但保留"验证码无效"之外的独立提示便于区分服务异常
+            current_app.logger.error(f"记录验证码尝试次数失败: {str(e)}")
+            return False, "验证服务异常，请稍后再试"
         return False, "验证码无效"
 
     # 验证成功后删除验证码与尝试计数

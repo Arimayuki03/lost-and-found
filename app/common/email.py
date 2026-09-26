@@ -28,6 +28,9 @@ def send_verification_email_endpoint():
     # 类型/长度防护：非字符串邮箱会污染 Redis 键并在下游产生 500
     if not isinstance(email, str) or len(email) > 100 or '@' not in email:
         return jsonify({"error": "邮箱格式不正确。"}), 400
+    # 归一化邮箱（SMTP 投递对域名/本地部分大小写不敏感）：重发锁与日上限键使用统一形式，
+    # 防止大小写变体（A@x.com / a@x.com）绕过限制构成邮件轰炸
+    email = email.strip().lower()
 
     # 检查是否在60秒内重发
     if redis_client.get(f"email_verification_lock:{email}"):

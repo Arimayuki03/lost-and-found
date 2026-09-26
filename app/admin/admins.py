@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from app import db
 from app.models import User, LostItem, FoundItem, Feedback, ItemMatch, ChatMessage
 from app.utils.decorators import admin_required
-from app.utils.password import hash_password, verify_user_password
+from app.utils.password import hash_password, verify_user_password, verify_dummy_password
 from app.utils.ratelimit import ip_rate_limit
 from app.utils.account_lock import is_locked, record_failure, clear_failures, SURFACE_ADMIN
 from app.utils.token_revocation import mark_user_tokens_revoked
@@ -44,6 +44,11 @@ def admin_login():
     try:
         # 查询管理员用户
         admin_user = User.query.filter_by(student_id=student_id, is_admin=True).first()
+
+        if admin_user is None:
+            # 时序对齐：用户不存在时也执行一次同等代价的哈希校验，
+            # 防止通过响应时间差枚举学号（account_lock 只统一了状态码与计数，未统一耗时）
+            verify_dummy_password(password)
 
         # 检查提供的学生ID和密码是否匹配
         if admin_user and verify_user_password(admin_user, password):
@@ -213,8 +218,9 @@ def get_users():
         else:
             users_query = users_query.order_by(User.id.desc())
 
-        # 分页（限制每页数量上限）
-        paginated = users_query.paginate(page=max(page, 1), per_page=min(max(size, 1), 100))
+        # 分页（限制每页数量上限；error_out=False：页码越界返回空列表而非内部 abort 404，
+        # 避免 NotFound 被末尾 except Exception 吞成 500，与 paginate_query 行为一致）
+        paginated = users_query.paginate(page=max(page, 1), per_page=min(max(size, 1), 100), error_out=False)
 
         # 一次聚合查询统计每用户的失物/拾物数量，避免逐用户 COUNT 的 N+1 查询
         user_ids = [u.id for u in paginated.items]

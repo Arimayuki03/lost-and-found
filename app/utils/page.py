@@ -1,7 +1,26 @@
+import datetime
+
 from flask import request
 from sqlalchemy.orm import Query
 from sqlalchemy import desc, asc, or_
 from flask import current_app
+
+
+def parse_local_datetime(value, field_name):
+    """解析 ISO 时间并归一化为 naive 本地时间（校验 + 去时区）。
+
+    Python 3.11+ 的 fromisoformat 接受 'Z'/'+08:00' 后缀并返回 tz-aware datetime，
+    而库列为无时区 DateTime：PyMySQL 落库只写年月日时分秒，偏移会被静默丢弃
+    （UTC+8 用户上午 8 点发布的 00:00Z 时间被存成 08:00）。这里在应用层显式
+    归一化：aware 时间先按其自带偏移还原为钟面时间再入库，与用户手动填写的
+    本地时间语义一致。非字符串/格式非法抛 ValueError，由调用方映射 400。
+    """
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name}需为字符串")
+    dt = datetime.datetime.fromisoformat(value)
+    # tz-aware：去掉 tzinfo 保留钟面时间（等效 astimezone(dt.tzinfo) 的极端简化，
+    # 即"用户填的就是他钟表上的时间"，与前端的本地时间约定一致）
+    return dt.replace(tzinfo=None)
 
 
 def escape_like(s: str) -> str:
@@ -108,10 +127,19 @@ def paginate_query(query: Query, default_page: int = 1, default_size: int = 10, 
             sort_column = getattr(model_class, sort_by, None)
 
             if sort_column is not None:
+                # 低基数列（如 is_completed）排序无唯一 tiebreaker 时，MySQL 不保证跨页顺序稳定，
+                # 翻页会重复/丢行；追加主键 id 作为 tiebreaker 保证分页顺序确定
+                id_column = getattr(model_class, 'id', None)
                 if sort_order.lower() == 'desc':
-                    query = query.order_by(desc(sort_column))
+                    if id_column is not None and id_column is not sort_column:
+                        query = query.order_by(desc(sort_column), desc(id_column))
+                    else:
+                        query = query.order_by(desc(sort_column))
                 else:
-                    query = query.order_by(asc(sort_column))
+                    if id_column is not None and id_column is not sort_column:
+                        query = query.order_by(asc(sort_column), asc(id_column))
+                    else:
+                        query = query.order_by(asc(sort_column))
             else:
                 # 白名单命中但模型上无该属性（防御性），回退 id 排序
                 query = _order_by_id(query, sort_order.lower() == 'desc')
@@ -123,8 +151,13 @@ def paginate_query(query: Query, default_page: int = 1, default_size: int = 10, 
         # 白名单未命中（或调用方未传白名单）→ 回退 id 排序，保证分页稳定性
         query = _order_by_id(query, sort_order.lower() == 'desc')
 
-    # 计算总数
+    # 计算总数（提前到分页前，用于页码上限钳制）
     total = query.count()
+
+    # 页码上限钳制：深度 OFFSET 会让 MySQL 扫过并丢弃前 offset 行（配合前导通配
+    # LIKE 时成本近似全表），按总数计算实际上限，超界页返回空列表而非巨扫
+    if total > 0:
+        page = min(page, max(1, -(-total // per_page)))
 
     # 应用分页
     items = query.offset((page - 1) * per_page).limit(per_page).all()

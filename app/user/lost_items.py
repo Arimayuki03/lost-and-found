@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from . import user
 from flask import request, jsonify, current_app
 from flask_jwt_extended import get_jwt_identity
@@ -7,7 +5,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from app import db
 from app.models import LostItem, ItemMatch
 from app.utils.decorators import user_required
-from app.utils.page import paginate_query, validate_str
+from app.utils.page import paginate_query, validate_str, parse_local_datetime
+
+# 会触发"内容变更需重新审核"的物品内容字段（is_completed/is_under_review 等状态字段除外）
+_CONTENT_FIELDS = {'category', 'name', 'description', 'lost_time', 'location', 'contact', 'image_url'}
 
 
 # 用户添加失物信息接口
@@ -40,9 +41,9 @@ def create_lost_item():
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
-        # 校验时间格式是否可解析
+        # 校验时间格式是否可解析（带时区后缀时归一化为 naive 钟面时间，防止 PyMySQL 静默丢弃偏移）
         try:
-            lost_time = datetime.fromisoformat(data['lost_time'])
+            lost_time = parse_local_datetime(data['lost_time'], 'lost_time')
         except (TypeError, ValueError):
             return jsonify({"error": "lost_time 时间格式无效"}), 400
 
@@ -102,7 +103,7 @@ def update_lost_item(item_id):
             return jsonify({"error": str(e)}), 400
         if 'lost_time' in data:
             try:
-                data['lost_time'] = datetime.fromisoformat(data['lost_time'])
+                data['lost_time'] = parse_local_datetime(data['lost_time'], 'lost_time')
             except (TypeError, ValueError):
                 return jsonify({"error": "lost_time 时间格式无效"}), 400
         # 完成状态直接参与审核流转判断，必须为布尔（"false" 等字符串会误判为真）
@@ -119,8 +120,10 @@ def update_lost_item(item_id):
         original_is_completed = lost_item.is_completed
         original_is_under_review = lost_item.is_under_review
 
-        # 检查是否只是更新完成状态
-        is_status_update_only = len(data) == 1 and 'is_completed' in data
+        # 用"是否携带内容字段"判断，而非 len(data)==1：body 多带任意未知字段（前端序列化
+        # 元数据、垃圾字段）时前者恒 False，会把已审核物品无改动打回审核队列且响应 200
+        content_changed = bool(_CONTENT_FIELDS & set(data.keys()))
+        is_status_update_only = 'is_completed' in data and not content_changed
         # 仅记录请求摘要，不落整个 body（可能含联系方式等 PII，与 log_sanitize 脱敏意图一致）
         current_app.logger.info(
             f"用户 {current_user} 提交了失物更新请求（字段数 {len(data)}），是否仅更新状态: {is_status_update_only}")
@@ -158,8 +161,9 @@ def update_lost_item(item_id):
                 # 保持当前审核状态不变
                 current_app.logger.info(f"物品 ID {item_id} 标记为已找到，保持审核状态不变")
 
-        # 如果不是仅更新完成状态，而是修改了物品信息，则需要重新审核
-        if not is_status_update_only:
+        # 只要出现内容字段就视为内容变更，需要重新审核（未知垃圾字段不触发，仅状态
+        # 更新也不触发：语义比"非仅状态更新"更精确，避免无改动物品被踢出公开列表）
+        if content_changed:
             lost_item.is_under_review = True  # 设置为需要审核
             current_app.logger.info(f"物品 ID {item_id} 信息被修改，设置为需要审核")
 

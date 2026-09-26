@@ -250,15 +250,16 @@ def sift_lost_items():
         else:
             query = query.order_by(LostItem.id.desc())
 
-        # 分页处理（限制每页数量上限）
-        paginated_items = query.paginate(page=max(page, 1), per_page=min(max(size, 1), 100))
+        # 分页处理（限制每页数量上限；error_out=False：页码越界返回空列表而非内部 abort 404，
+        # 避免 NotFound 被末尾 except Exception 吞成 500，与 paginate_query 行为一致）
+        paginated_items = query.paginate(page=max(page, 1), per_page=min(max(size, 1), 100), error_out=False)
 
-        # 返回分页结果
+        # 返回分页结果（page/size 回显实际执行值，避免原始参数为负数/超大值时分页控件错乱）
         return jsonify({
             'items': [item.to_dict() for item in paginated_items.items],
             'total': paginated_items.total,
-            'page': page,
-            'size': size
+            'page': paginated_items.page,
+            'size': paginated_items.per_page
         })
     except ValueError as e:
         current_app.logger.error(f"参数错误: {str(e)}")

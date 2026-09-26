@@ -4,7 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from app import db
 from app.models import User
 from app.utils.code import verify_email_logic
-from app.utils.password import hash_password, verify_user_password
+from app.utils.password import hash_password, verify_user_password, verify_dummy_password
 from app.utils.ratelimit import ip_rate_limit
 from app.utils.account_lock import is_locked, record_failure, clear_failures, SURFACE_USER
 from app.utils.token_revocation import mark_user_tokens_revoked
@@ -126,6 +126,10 @@ def login():
 
         # 查找用户
         user = User.query.filter_by(student_id=student_id).first()
+        if user is None:
+            # 时序对齐：用户不存在时也执行一次同等代价的哈希校验，
+            # 防止通过响应时间差枚举学号（account_lock 只统一了状态码与计数，未统一耗时）
+            verify_dummy_password(data['password'])
         if user and verify_user_password(user, data['password']):
             # 若数据库中为历史明文密码，verify_user_password 已将其升级为哈希，此处统一提交
             db.session.commit()
@@ -245,6 +249,8 @@ def get_profile():
 
 # 根据ID获取用户信息接口
 @user.route('/profile/<int:user_id>', methods=['GET'])
+# 公开端点对齐其他公开接口的限流策略，防全量遍历爬取
+@ip_rate_limit('user_profile', 30, 60)
 def get_user_by_id(user_id):
     try:
         # 查找用户
@@ -328,6 +334,8 @@ def update_avatar():
 
 # 用户修改邮箱接口
 @user.route('/email', methods=['POST'])
+# 每邮箱的重发锁挡不住按 IP 无速率提交：缺限流时可无速率作废任意邮箱验证码（验证码爆破）
+@ip_rate_limit('user_email_change', 10, 60)
 @user_required  # 需要用户登录
 def change_email():
     try:
@@ -348,6 +356,19 @@ def change_email():
         if not isinstance(new_email, str) or len(new_email) > 100 or '@' not in new_email:
             return jsonify({"error": "邮箱需为长度不超过100且包含@的字符串"}), 400
 
+        # step-up 认证：换绑邮箱与改密同级敏感，必须校验当前密码——
+        # 否则被盗 access token（15 分钟）即可换绑邮箱再自助重置密码，实现永久接管。
+        # 放在验证码校验之前，避免密码错误时白白消耗一次性邮箱验证码
+        user = User.query.get(current_user_id)
+        if not user:
+            current_app.logger.warning(f"用户 ID {current_user_id} 未找到")
+            return jsonify({"error": "用户未找到"}), 404
+        password = data.get('password')
+        # verify_user_password 内部 check_password_hash 对非字符串会抛 TypeError，先做类型防护
+        if not isinstance(password, str) or not password or not verify_user_password(user, password):
+            current_app.logger.warning(f"用户 ID {current_user_id} 换绑邮箱时密码校验失败")
+            return jsonify({"error": "当前密码不正确"}), 400
+
         # 验证邮箱验证码
         success, message = verify_email_logic(new_email, code)
         if not success:
@@ -360,11 +381,6 @@ def change_email():
             return jsonify({"error": "邮箱已被绑定"}), 400
 
         # 更新用户邮箱
-        user = User.query.get(current_user_id)
-        if not user:
-            current_app.logger.warning(f"用户 ID {current_user_id} 未找到")
-            return jsonify({"error": "用户未找到"}), 404
-
         user.email = new_email
         db.session.commit()
         current_app.logger.info(f"用户 ID {current_user_id} 邮箱更新成功")

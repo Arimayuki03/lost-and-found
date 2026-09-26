@@ -36,12 +36,24 @@ def _surface_prefix(surface):
     return _SURFACE_PREFIXES.get(surface, _SURFACE_PREFIXES[_DEFAULT_SURFACE])
 
 
+def _normalize_identifier(identifier):
+    """归一化登录标识（去首尾空白 + casefold）。
+
+    与 MySQL utf8mb4_0900_ai_ci 大小写不敏感排序规则对齐，防止大小写变体绕过锁定：
+    数据库查询不区分大小写，而 Redis 键区分，不归一化时攻击者可用 Admin/ADMIN 等变体
+    分散失败计数、绕过账号锁定。
+    """
+    if not isinstance(identifier, str):
+        identifier = str(identifier)
+    return identifier.strip().casefold()
+
+
 def _lock_key(identifier, surface=_DEFAULT_SURFACE):
-    return f"login_lock:{_surface_prefix(surface)}:{identifier}"
+    return f"login_lock:{_surface_prefix(surface)}:{_normalize_identifier(identifier)}"
 
 
 def _fail_key(identifier, surface=_DEFAULT_SURFACE):
-    return f"login_failures:{_surface_prefix(surface)}:{identifier}"
+    return f"login_failures:{_surface_prefix(surface)}:{_normalize_identifier(identifier)}"
 
 
 def is_locked(identifier, surface=_DEFAULT_SURFACE):
@@ -73,8 +85,9 @@ def record_failure(identifier, max_failures=MAX_LOGIN_FAILURES, surface=_DEFAULT
     try:
         fail_key = _fail_key(identifier, surface)
         count = redis_client.incr(fail_key)
-        if count == 1:
-            redis_client.expire(fail_key, FAILURE_WINDOW_SECONDS)
+        # 无条件重设过期时间：INCR 与 EXPIRE 两步非原子，两步之间异常中断会残留
+        # 永不过期的计数键（失败窗口形同虚设）；每次失败重设窗口可自愈历史残留键
+        redis_client.expire(fail_key, FAILURE_WINDOW_SECONDS)
         if count >= max_failures:
             redis_client.setex(_lock_key(identifier, surface), LOCK_SECONDS, int(time.time()))
         return count

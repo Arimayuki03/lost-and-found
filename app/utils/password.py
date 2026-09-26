@@ -4,6 +4,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 _HASH_PREFIXES = ('scrypt:', 'pbkdf2:')
 
 
+# 时序防护用的固定哑哈希：用户不存在时也执行一次同代价校验，抹平"存在/不存在"的响应时间差
+_DUMMY_HASH = generate_password_hash('dummy-password-for-timing-equalization')
+
+
 def hash_password(raw_password):
     """将明文密码哈希后返回，用于所有新密码的写入"""
     return generate_password_hash(raw_password)
@@ -28,3 +32,10 @@ def verify_user_password(user, raw_password):
         return True
 
     return False
+
+
+def verify_dummy_password(raw_password):
+    """对哑哈希执行一次校验（结果丢弃），仅用于用户不存在路径的时序对齐。"""
+    if not isinstance(raw_password, str):
+        return False
+    return check_password_hash(_DUMMY_HASH, raw_password)

@@ -140,7 +140,8 @@ def delete_expired_images():
             # 列出MinIO桶中的所有文件
             # 24小时保护期：刚上传、尚未写入数据库的图片（上传与发布之间存在时间窗）不能删
             protection_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-            objects = client.list_objects(MINIO_BUCKET_NAME)
+            # 必须递归列举，否则 avatars/ 等子目录对象以目录伪条目出现，头像孤儿永不清理
+            objects = client.list_objects(MINIO_BUCKET_NAME, recursive=True)
             for obj in objects:
                 # 检查文件名是否在数据库中
                 if obj.object_name not in all_images:

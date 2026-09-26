@@ -14,6 +14,8 @@
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?logo=socketdotio&logoColor=white)](https://flask-socketio.readthedocs.io/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Arimayuki03/lost-and-found?label=Release)](../../releases)
+[![Tests](https://img.shields.io/badge/tests-18%2F18%20passed-brightgreen)](tests/test_smoke.py)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue)](CHANGELOG.md)
 
 </div>
 
@@ -22,6 +24,8 @@
 ## 📖 简介
 
 用户可以发布失物（丢失物品）和拾物（捡到的物品）信息，系统通过相似度算法自动匹配置物与失主，并通过邮件通知双方；同时提供实时私信、物品审核、公告轮播图管理、数据统计等完整功能。
+
+> **v1.0.1**：全量代码审查后集中修复 20+ 项问题——Socket.IO 四条认证路径统一撤销检查、账号锁定键大小写归一化防绕过、Redis 客户端补超时防挂起阻塞、演示数据明文密码全部替换为 scrypt 哈希、匹配任务会话回滚防瘫痪等。详见 [CHANGELOG](CHANGELOG.md)。
 
 ## 📦 相关仓库
 
@@ -91,17 +95,17 @@ cp .env.example .env
 
 各变量含义见下方[环境变量说明](#️-环境变量说明)。`.env` 已被 `.gitignore` 忽略，切勿提交真实密钥。
 
-### 3. 启动 MinIO 与 Redis
+### 3. 启动 MinIO、Redis 与 MySQL
 
 ```bash
 docker compose up -d
 ```
 
-将启动 MinIO（9000/9001 端口，仅绑定 127.0.0.1）与 Redis（6379 端口），数据持久化在 Docker 卷中。MySQL 可复用本机服务。
+将一键启动 MySQL 8（3306，utf8mb4，首次启动自动导入建库脚本）、MinIO（9000/9001）与 Redis（6379，默认启用 requirepass + AOF），全部仅绑定 `127.0.0.1`，数据持久化在 Docker 卷中。也可复用本机已有的 MySQL/Redis 服务（数据库连接与密码通过 `.env` 与 `MINIO_ROOT_PASSWORD` / `REDIS_PASSWORD` 等环境变量对齐）。
 
 ### 4. 初始化数据库
 
-创建数据库后导入建库脚本（也可选导入 `测试数据.sql` 获得一批演示数据）：
+使用上一步 Docker 编排的 MySQL 时建库脚本已自动导入，可跳过本节。使用本机 MySQL 时手动创建并导入（也可选导入 `测试数据.sql` 获得一批演示数据，仅限本地演示环境，禁止导入生产库）：
 
 ```sql
 CREATE DATABASE lost_and_found DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -132,6 +136,18 @@ python tests/test_smoke.py                       # Linux / macOS
 ```
 
 冒烟测试使用 SQLite 内存库与 Redis fail-open 降级，无需真实 MySQL/Redis/MinIO 即可运行，覆盖鉴权穿越、登录类型校验、登出撤销、统计分桶、匹配过滤、限流装饰器等关键回归（18 项断言）。
+
+## 🩹 v1.0.1 安全与缺陷修复摘要
+
+2026-09-26 全量代码审查（8 个维度）后集中修复，完整清单见 [CHANGELOG.md](CHANGELOG.md)：
+
+| 类别 | 修复内容 |
+| --- | --- |
+| 认证安全 | Socket.IO 四条认证路径统一令牌撤销检查；账号锁定 Redis 键大小写归一化，防 `Admin`/`ADMIN` 变体绕过 15 分钟锁定；Redis 客户端补 3s socket 超时，防挂起阻塞全部请求；改绑邮箱补 step-up 当前密码校验；邮箱验证码键 `strip().lower()` 归一化防邮件轰炸 |
+| 接口防护 | `POST /user/email` 补 IP 限流；`X-Forwarded-For` 取最右段防伪造绕过限流；登录"用户不存在"路径补哑哈希校验防学号枚举；分页页码/每页数夹取合法区间 |
+| 业务缺陷 | 匹配任务异常补 `rollback()` 防 session 污染导致匹配永久瘫痪；归一化口径统一到预筛阶段；物品更新判定改按内容字段；带时区时间统一归一化 naive 钟面时间，消除 8 小时偏移 |
+| 数据一致 | SQLAlchemy 模型与 SQL 脚本对齐（列长、外键 ondelete、索引）；匹配成功率改 distinct 物品口径不再超 100%；聊天已读时间用 DB 存储值 |
+| 部署安全 | 演示数据 40 个账号明文密码 `123456` 全部替换为独立随机盐 scrypt 哈希；docker-compose 收紧（Redis requirepass + AOF、MinIO/MySQL 凭据环境变量化、MySQL 8 纳入编排） |
 
 ## 🏗️ 项目结构
 
@@ -345,7 +361,7 @@ API 按蓝图划分为四个模块（注册见 `app/__init__.py`）：
 
 ## 🔒 安全与注意事项
 
-- 密码使用 werkzeug 哈希存储（详见 `app/utils/password.py`）；数据库中的历史明文密码会在该用户下次登录成功时自动升级为哈希。
+- 密码使用 werkzeug 哈希存储（详见 `app/utils/password.py`）；数据库中的历史明文密码会在该用户下次登录成功时自动升级为哈希。`测试数据.sql` 中的演示账号均为独立随机盐哈希，**仅限本地演示，禁止导入生产环境**。
 - 登录安全：连续失败 5 次锁定账号 15 分钟（用户端/管理端/超管端独立计数，见 `app/utils/account_lock.py`），并配有基于 Redis 的 IP 限流（`app/utils/ratelimit.py`）。
 - 令牌安全：修改密码后签发时间早于变更时刻的旧令牌自动失效；登出时当前令牌按 jti 拉黑立即失效，超管令牌同样受登出撤销约束（见 `app/utils/token_revocation.py`）；用户端接口按 `user_required` 校验 role claim，拒绝超管令牌穿越；日志中的 SQL 绑定参数已统一脱敏（`app/utils/log_sanitize.py`）。
 - Werkzeug 调试器默认关闭（安全考虑，`0.0.0.0` 上开启等同于远程代码执行入口）；本机临时调试时以 `FLASK_DEBUG=1` 启动。

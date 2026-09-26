@@ -1,10 +1,8 @@
-from datetime import datetime
-
 from . import common
 from flask import request, jsonify, current_app
 from app.models import LostItem
 from sqlalchemy.exc import SQLAlchemyError
-from app.utils.page import paginate_query, escape_like
+from app.utils.page import paginate_query, escape_like, parse_local_datetime
 from app.utils.ratelimit import ip_rate_limit
 
 
@@ -100,21 +98,32 @@ def sift_lost_items():
             is_completed_bool = is_completed.lower() == 'true'
             query = query.filter(LostItem.is_completed == is_completed_bool)
         if user_id:
-            query = query.filter(LostItem.user_id == user_id)  # 精确匹配
-        # 新增时间范围筛选（先校验时间格式，防止非法字符串参与比较导致异常）
+            # user_id 必须为整数（对齐 admin 端），非数字串直接拒绝而非参与列比较
+            try:
+                uid = int(user_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "user_id 需为整数"}), 400
+            query = query.filter(LostItem.user_id == uid)  # 精确匹配
+        # 新增时间范围筛选（校验后立刻转为 datetime 对象传入 filter：消除"Python 校验
+        # 通过但 MySQL 不认的字符串"导致的 500，同时归一化时区后缀为钟面时间）
+        start_dt = end_dt = None
         for param_name, param_value in (('start_time', start_time), ('end_time', end_time)):
             if param_value:
                 try:
-                    datetime.fromisoformat(param_value)
-                except ValueError:
+                    converted = parse_local_datetime(param_value, param_name)
+                except (TypeError, ValueError):
                     return jsonify({"error": f"{param_name} 时间格式无效"}), 400
+                if param_name == 'start_time':
+                    start_dt = converted
+                else:
+                    end_dt = converted
 
-        if start_time:
-            # 使用精确时间比较，而不是只比较日期部分
-            query = query.filter(LostItem.lost_time >= start_time)
-        if end_time:
-            # 使用精确时间比较，而不是只比较日期部分
-            query = query.filter(LostItem.lost_time <= end_time)
+        if start_dt is not None:
+            # 使用精确时间比较（datetime 对象），而不是只比较日期部分
+            query = query.filter(LostItem.lost_time >= start_dt)
+        if end_dt is not None:
+            # 使用精确时间比较（datetime 对象），而不是只比较日期部分
+            query = query.filter(LostItem.lost_time <= end_dt)
 
         # 执行查询并分页
         result = paginate_query(

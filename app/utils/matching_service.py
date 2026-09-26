@@ -49,6 +49,15 @@ LOCATION_WEIGHT = 0.1  # 地点权重
 TIME_WEIGHT = 0.1  # 时间权重
 
 
+def _normalize_text(s):
+    """
+    文本归一化：转小写并移除标点等特殊字符，返回归一化后的字符串
+    （无匹配内容时返回空串）。供相似度计算与名称预筛选共用，
+    保证两者口径一致。
+    """
+    return re.sub(r'[^\w\s]', '', (s or '').lower())
+
+
 def calculate_text_similarity(text1, text2):
     """
     计算两个文本的相似度
@@ -57,8 +66,8 @@ def calculate_text_similarity(text1, text2):
         return 0.0
 
     # 将文本转换为小写并移除特殊字符
-    text1 = re.sub(r'[^\w\s]', '', text1.lower())
-    text2 = re.sub(r'[^\w\s]', '', text2.lower())
+    text1 = _normalize_text(text1)
+    text2 = _normalize_text(text2)
 
     # 使用difflib计算相似度
     return difflib.SequenceMatcher(None, text1, text2).ratio()
@@ -161,8 +170,13 @@ def match_items():
                     continue
 
                 # 快速预筛选
-                if difflib.SequenceMatcher(None, lost['name'],
-                                           found['name']).quick_ratio() < NAME_SIMILARITY_THRESHOLD * 0.7:
+                # 必须在归一化后的名称上做预筛：正式计算（calculate_text_similarity）
+                # 用的是去标点转小写后的文本，若用原始字符串预筛，名称标点占比高时
+                # quick_ratio 会低于阈值而归一化后 ratio 达标，真实匹配被直接跳过。
+                # 归一化后为空串时 quick_ratio 为 0，与 calculate_text_similarity
+                # 对空文本返回 0.0 的行为一致，同样会被过滤
+                if difflib.SequenceMatcher(None, _normalize_text(lost['name']),
+                                           _normalize_text(found['name'])).quick_ratio() < NAME_SIMILARITY_THRESHOLD * 0.7:
                     continue
 
                 # 使用calculate_text_similarity计算名称相似度
@@ -252,6 +266,10 @@ def match_items():
         return match_count
 
     except Exception as e:
+        # commit 失败后 session 进入 PendingRollbackError 状态，db.session 是线程级
+        # scoped session，APScheduler 工作线程会复用同一 session，不回滚会导致
+        # 此后每轮任务第一条查询即抛错，匹配任务永久瘫痪直至进程重启，必须先回滚
+        db.session.rollback()
         current_app.logger.error(f"匹配失物和拾物时出错: {str(e)}")
         return 0
     finally:
@@ -342,6 +360,9 @@ def send_match_notification(match):
                 current_app.logger.error(f"记录匹配通知重试计数失败（匹配ID={match.id}）: {str(e)}")
 
     except Exception as e:
+        # 326/335 行的 commit 失败会落到此处，不回滚则 session 残留 PendingRollbackError，
+        # 后续复用同一线程 session 的查询（含下轮 match_items）全部失败，先回滚再记日志
+        db.session.rollback()
         current_app.logger.error(f"发送匹配通知时出错: {str(e)}")
         current_app.logger.error(traceback.format_exc())
 

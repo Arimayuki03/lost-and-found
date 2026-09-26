@@ -11,6 +11,50 @@ PWD_CHANGED_TTL_SECONDS = 31 * 86400
 REVOKED_JTI_FALLBACK_TTL_SECONDS = 86400
 
 
+def is_token_revoked(claims):
+    """检查令牌 claims 是否已被服务端撤销（jti 拉黑 + 密码变更时间戳）。
+
+    供 app/__init__.py 的 token_in_blocklist_loader 与 Socket.IO 认证路径共用：
+    decode_token 只做签名/有效期校验，不触发 blocklist 回调，因此不经
+    @jwt_required 的认证（如 Socket.IO 事件认证）必须显式调用本函数，
+    否则已登出（jti 拉黑）或被重置密码（iat 早于变更时间）的令牌
+    在实时通道上仍可收发私信。
+
+    fail-open：Redis 异常时放行（返回 False），与 HTTP 侧"可用性优先"策略一致。
+    """
+    try:
+        jti = claims.get('jti')
+        if jti and redis_client.get(f"revoked_jti:{jti}"):
+            return True
+    except Exception as e:
+        _log_error(f"令牌撤销检查失败（Redis 异常，放行以免全站不可用）: {str(e)}")
+        return False
+    # 密码修改/重置后撤销旧令牌：令牌签发时间（iat）早于密码变更时间即拒绝。
+    # 超管令牌不做此检查：其 identity 是 super_admins 表 ID，与用户表共用数字空间
+    if claims.get('role') == 'super_admin':
+        return False
+    try:
+        changed_at = redis_client.get(f"pwd_changed_at:user:{claims.get('sub')}")
+    except Exception as e:
+        _log_error(f"令牌撤销检查失败（Redis 异常，放行以免全站不可用）: {str(e)}")
+        return False
+    if not changed_at:
+        return False
+    iat = claims.get('iat')
+    # 用 <= 而非 <：改密同一秒内签发的旧令牌（iat == changed_at）也必须撤销，
+    # 否则"登录后立刻改密"场景下旧 access/refresh token 仍有效（实测可复现）。
+    # 副作用：改密后同一秒内新登录签发的令牌会被误拒，下次请求重新登录即自愈，可接受。
+    return iat is not None and int(iat) <= int(float(changed_at))
+
+
+def _log_error(message):
+    """调度器等请求上下文之外调用时 current_app 不可用，退化为直接输出。"""
+    try:
+        current_app.logger.error(message)
+    except RuntimeError:
+        print(message)
+
+
 def mark_user_tokens_revoked(user_id):
     """记录用户密码变更时间戳；签发时间早于该时刻的令牌会在 blocklist 检查中被拒绝。
 

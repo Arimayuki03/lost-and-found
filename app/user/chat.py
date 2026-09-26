@@ -7,8 +7,45 @@ from sqlalchemy import text, or_, func, case
 from app import db, socketio
 from app.models import ChatMessage, User
 from app.utils.decorators import user_required
+from app.utils.token_revocation import is_token_revoked
 from . import user
 from functools import wraps
+
+
+def _authenticate_session_token(token):
+    """校验用户 access token 并完成会话登记，供 Socket.IO 各认证路径共用。
+
+    返回 (user_id, None) 或 (None, 错误消息)。decode_token 只做签名/有效期校验，
+    不触发 HTTP 侧的 blocklist 回调，因此必须显式调用 is_token_revoked：
+    否则已登出（jti 拉黑）或被重置密码（iat 早于变更时间）的令牌在实时通道上仍可用。
+    同时校验 User 存在，封住"已删除用户的旧令牌继续收发私信"的口子。
+    """
+    try:
+        decoded_token = decode_token(token)
+    except Exception as token_error:
+        current_app.logger.error(f"Token验证失败: {str(token_error)}")
+        return None, '无效的认证令牌'
+
+    # 仅接受 access token；超管令牌不是用户身份
+    if decoded_token.get('type') != 'access' or decoded_token.get('role') == 'super_admin':
+        return None, '无效的认证令牌'
+
+    # 撤销检查（与 HTTP 侧 token_in_blocklist_loader 同一实现）
+    if is_token_revoked(decoded_token):
+        return None, '令牌已失效，请重新登录'
+
+    user_id = decoded_token['sub']
+    if not User.query.get(user_id):
+        return None, '用户不存在'
+
+    # 认证成功：写会话并加入个人房间。
+    # 个人房间必须在所有认证路径统一加入：私信同时推给接收者的 user:<id> 房间，
+    # 若仅 authenticate 事件加房，经 URL token / 事件参数 token 认证的连接
+    # 停留在首页时将收不到实时推送与未读角标
+    session['user_id'] = user_id
+    session['role'] = decoded_token.get('role')
+    join_room(f"user:{user_id}")
+    return user_id, None
 
 
 # 自定义Socket.IO认证装饰器，从请求中获取token并验证
@@ -16,7 +53,7 @@ def socketio_jwt_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         try:
-            # 尝试从会话中获取用户ID
+            # 尝试从会话中获取用户ID（会话在首次认证时已通过撤销检查）
             if session.get('user_id'):
                 # 超管令牌不是用户身份，不允许参与用户聊天
                 if session.get('role') == 'super_admin':
@@ -35,40 +72,20 @@ def socketio_jwt_required(f):
                     token = args[0].get('token')
 
                 if token:
-                    try:
-                        # 验证并解码token
-                        decoded_token = decode_token(token)
-                        # 仅接受 access token；超管令牌不是用户身份
-                        if decoded_token.get('type') != 'access' or decoded_token.get('role') == 'super_admin':
-                            return emit('error', {'error': '无效的认证令牌'})
-                        user_id = decoded_token['sub']  # JWT的subject字段
-                        # 将用户ID存储在会话中
-                        session['user_id'] = user_id
-                        session['role'] = decoded_token.get('role')
-                        # 修改args[0]以传递用户ID
-                        args[0]['user_id'] = user_id
-                        return f(*args, **kwargs)
-                    except Exception as token_error:
-                        current_app.logger.error(f"Token验证失败: {str(token_error)}")
-                        return emit('error', {'error': '无效的认证令牌'})
+                    user_id, error = _authenticate_session_token(token)
+                    if user_id is None:
+                        return emit('error', {'error': error})
+                    # 修改args[0]以传递用户ID
+                    args[0]['user_id'] = user_id
+                    return f(*args, **kwargs)
 
             # 尝试从请求参数中获取token
             token = request.args.get('token')
             if token:
-                try:
-                    # 验证并解码token
-                    decoded_token = decode_token(token)
-                    # 仅接受 access token；超管令牌不是用户身份
-                    if decoded_token.get('type') != 'access' or decoded_token.get('role') == 'super_admin':
-                        return emit('error', {'error': '无效的认证令牌'})
-                    user_id = decoded_token['sub']
-                    # 将用户ID存储在会话中
-                    session['user_id'] = user_id
-                    session['role'] = decoded_token.get('role')
-                    return f(*args, **kwargs)
-                except Exception as token_error:
-                    current_app.logger.error(f"Token验证失败: {str(token_error)}")
-                    return emit('error', {'error': '无效的认证令牌'})
+                user_id, error = _authenticate_session_token(token)
+                if user_id is None:
+                    return emit('error', {'error': error})
+                return f(*args, **kwargs)
 
             # 如果没有找到有效的token
             return emit('error', {'error': '需要认证', 'code': 401})
@@ -87,23 +104,14 @@ def handle_connect():
         # 从URL参数中获取token
         token = request.args.get('token')
         if token:
-            try:
-                # 验证并解码token
-                decoded_token = decode_token(token)
-                # 仅接受 access token；超管令牌不是用户身份
-                if decoded_token.get('type') != 'access' or decoded_token.get('role') == 'super_admin':
-                    raise ValueError('无效的认证令牌')
-                user_id = decoded_token['sub']
-                # 将用户ID存储在会话中
-                session['user_id'] = user_id
-                session['role'] = decoded_token.get('role')
+            user_id, error = _authenticate_session_token(token)
+            if user_id is not None:
                 current_app.logger.info(f"用户 {user_id} 已连接")
-                return True
-            except Exception as token_error:
-                current_app.logger.error(f"连接时Token验证失败: {str(token_error)}")
-                # 允许连接，但不存储用户ID
-                return True
-        # 允许未认证连接，后续事件处理时再验证
+            else:
+                # 校验失败仅记日志：允许连接保持，后续事件认证时再拦截，
+                # 与"匿名连接、事件级认证"的既有行为一致
+                current_app.logger.warning(f"连接时Token验证失败: {error}")
+        # 无 token 时允许未认证连接，后续事件处理时再验证
         return True
     except Exception as e:
         current_app.logger.error(f"处理连接事件时出错: {str(e)}")
@@ -117,6 +125,18 @@ def handle_disconnect():
     try:
         user_id = session.get('user_id')
         if user_id:
+            # 向该连接加入过的所有私聊房间广播离线，否则异常断线（关页面/断网）
+            # 后对方界面永久停留在 online（显式 leave 才广播 offline，disconnect 不广播）
+            try:
+                for room in socketio.server.rooms(request.sid):
+                    if isinstance(room, str) and room.startswith('chat:'):
+                        emit('user_status_change', {
+                            'user_id': user_id,
+                            'status': 'offline',
+                            'timestamp': datetime.now(timezone.utc).isoformat()
+                        }, room=room, include_self=False)
+            except Exception as room_error:
+                current_app.logger.error(f"断线广播离线状态失败: {str(room_error)}")
             current_app.logger.info(f"用户 {user_id} 已断开连接")
             # 可以选择清除会话数据
             session.pop('user_id', None)
@@ -140,27 +160,12 @@ def handle_authenticate(data):
         if not token:
             return emit('authenticate_result', {'success': False, 'error': '认证令牌不能为空'})
 
-        try:
-            # 验证并解码token
-            decoded_token = decode_token(token)
-            # 仅接受 access token；超管令牌不是用户身份
-            if decoded_token.get('type') != 'access' or decoded_token.get('role') == 'super_admin':
-                return emit('authenticate_result', {'success': False, 'error': '无效的认证令牌'})
-            user_id = decoded_token['sub']
+        user_id, error = _authenticate_session_token(token)
+        if user_id is None:
+            return emit('authenticate_result', {'success': False, 'error': error})
 
-            # 将用户ID存储在会话中
-            session['user_id'] = user_id
-            session['role'] = decoded_token.get('role')
-
-            # 加入个人房间：私聊消息同时推给接收者的 user:<id> 房间，
-            # 接收者不在对应 chat 房间（如停留在首页）时也能收到实时推送/未读角标
-            join_room(f"user:{user_id}")
-
-            # 返回认证成功响应
-            return emit('authenticate_result', {'success': True, 'user_id': user_id})
-        except Exception as token_error:
-            current_app.logger.error(f"令牌验证失败: {str(token_error)}")
-            return emit('authenticate_result', {'success': False, 'error': '无效的认证令牌'})
+        # 返回认证成功响应（个人房间已在 _authenticate_session_token 中加入）
+        return emit('authenticate_result', {'success': True, 'user_id': user_id})
     except Exception as e:
         current_app.logger.error(f"认证处理错误: {str(e)}")
         current_app.logger.error(traceback.format_exc())
@@ -291,6 +296,15 @@ def handle_send_private_message(data):
         if not receiver_id or not message:
             return emit('error', {'error': '接收者ID和消息内容不能为空', 'originEvent': 'send_private_message'})
 
+        # 类型防护：与 HTTP 端 /user/chat/message 对齐——非数字 receiver_id 会在
+        # User.query.get() 处抛异常，非字符串 message 会在 len() 处抛 TypeError
+        try:
+            receiver_id = int(receiver_id)
+        except (TypeError, ValueError):
+            return emit('error', {'error': '接收者ID无效', 'originEvent': 'send_private_message'})
+        if not isinstance(message, str):
+            return emit('error', {'error': '消息内容需为字符串', 'originEvent': 'send_private_message'})
+
         # 验证接收者是否存在
         receiver = User.query.get(receiver_id)
         if not receiver:
@@ -384,7 +398,9 @@ def handle_private_message_read(data):
             'receiver_id': receiver_id,
             'sender_id': message.sender_id,
             'room_name': room,
-            'read_at': datetime.now(timezone.utc).isoformat()
+            # read_at 以 DB 存储值为准（与历史消息接口同源同钟），
+            # 不另行用应用时钟生成，避免 DB 会话时区与应用 UTC 不一致时已读时间跳变
+            'read_at': message.read_at.isoformat() if message.read_at else None
         }, room=room)
 
         current_app.logger.info(f"已通知用户 {message.sender_id} 消息 {message_id} 已被用户 {receiver_id} 阅读")
@@ -563,14 +579,19 @@ def mark_conversation_read(partner_id):
         try:
             room_ids = sorted([int(user_id), int(partner_id)])
             room = f"chat:{room_ids[0]}-{room_ids[1]}"
-            now_iso = datetime.now(timezone.utc).isoformat()
+            # read_at 以 DB 存储值为准（与历史消息接口同源同钟），
+            # 不用应用时钟生成，避免 DB 会话时区与应用 UTC 不一致时已读时间跳变；
+            # 批量更新为同一语句，任取一条刷新后的 read_at 供全部回执共用
+            first_read_at = db.session.query(ChatMessage.read_at).filter(
+                ChatMessage.id == msg_ids[0]
+            ).scalar()
             for mid in msg_ids:
                 socketio.emit('private_message_read', {
                     'message_id': mid,
                     'receiver_id': user_id,
                     'sender_id': partner_id,
                     'room_name': room,
-                    'read_at': now_iso
+                    'read_at': first_read_at.isoformat() if first_read_at else None
                 }, room=room)
         except Exception as socket_error:
             # 回执推送失败不影响已读结果（DB 已提交），仅记日志

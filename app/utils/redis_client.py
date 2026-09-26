@@ -40,7 +40,13 @@ def create_redis_client():
         db=Config.REDIS_DB,
         # Config 里定义了 REDIS_PASSWORD 但此前从未传入，配置了密码也不会生效
         password=Config.REDIS_PASSWORD or None,
-        decode_responses=True
+        decode_responses=True,
+        # socket 级超时：超时后抛异常才能触发既有的 fail-open 降级路径；无超时的
+        # 阻塞型故障（iptables DROP、Redis 进程暂停等挂起而非拒绝连接）会让
+        # 全站已认证请求在 token_in_blocklist_loader 查 Redis 时挂死
+        socket_connect_timeout=3,
+        socket_timeout=3,
+        health_check_interval=30
     )
 
 

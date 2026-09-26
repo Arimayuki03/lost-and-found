@@ -1,4 +1,4 @@
-from sqlalchemy import TIMESTAMP, UniqueConstraint
+from sqlalchemy import TIMESTAMP, UniqueConstraint, text
 from sqlalchemy.sql import func
 
 from app import db
@@ -13,9 +13,13 @@ class User(db.Model):
     is_admin = db.Column(db.Boolean, default=False)
     lost_items = db.relationship('LostItem', backref='user', lazy=True)
     found_items = db.relationship('FoundItem', backref='user', lazy=True)
-    avatar_url = db.Column(db.String(200), nullable=True)
+    # 长度对齐 lost_and_found.sql 中 varchar(255)；SQL 侧为 NOT NULL，但代码写入路径全部兜底空串，
+    # 改 NOT NULL 会破坏现有写入路径，此差异可接受
+    avatar_url = db.Column(db.String(255), nullable=True)
     email = db.Column(db.String(100), unique=True, nullable=False)
     created_at = db.Column(TIMESTAMP, server_default=func.now())
+    # 对齐 lost_and_found.sql 中 user.updated_at（DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP）
+    updated_at = db.Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
 
 class LostItem(db.Model):
@@ -26,10 +30,13 @@ class LostItem(db.Model):
     lost_time = db.Column(db.DateTime, nullable=False)
     location = db.Column(db.String(200), nullable=False)
     contact = db.Column(db.String(50), nullable=False)
-    image_url = db.Column(db.String(200), nullable=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    is_completed = db.Column(db.Boolean, default=False)
-    is_under_review = db.Column(db.Boolean, default=True)
+    # 长度对齐 lost_and_found.sql 中 varchar(255)
+    image_url = db.Column(db.String(255), nullable=True)
+    # ondelete 对齐 SQL 外键 ON DELETE CASCADE
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    # server_default 让绕过 ORM 的写入（手工 SQL/测试数据导入）也能拿到默认值，与 SQL 脚本 DEFAULT 一致
+    is_completed = db.Column(db.Boolean, default=False, server_default=text('0'))
+    is_under_review = db.Column(db.Boolean, default=True, server_default=text('1'))
     created_at = db.Column(TIMESTAMP, server_default=func.now())
     updated_at = db.Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
@@ -59,10 +66,13 @@ class FoundItem(db.Model):
     found_time = db.Column(db.DateTime, nullable=False)
     location = db.Column(db.String(200), nullable=False)
     contact = db.Column(db.String(50), nullable=False)
-    image_url = db.Column(db.String(200), nullable=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    is_completed = db.Column(db.Boolean, default=False)
-    is_under_review = db.Column(db.Boolean, default=True)
+    # 长度对齐 lost_and_found.sql 中 varchar(255)
+    image_url = db.Column(db.String(255), nullable=True)
+    # ondelete 对齐 SQL 外键 ON DELETE CASCADE
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    # server_default 让绕过 ORM 的写入（手工 SQL/测试数据导入）也能拿到默认值，与 SQL 脚本 DEFAULT 一致
+    is_completed = db.Column(db.Boolean, default=False, server_default=text('0'))
+    is_under_review = db.Column(db.Boolean, default=True, server_default=text('1'))
     created_at = db.Column(TIMESTAMP, server_default=func.now())
     updated_at = db.Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
@@ -86,7 +96,8 @@ class FoundItem(db.Model):
 
 class Feedback(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    # ondelete 对齐 SQL 外键 ON DELETE RESTRICT
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='RESTRICT'), nullable=False)
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(TIMESTAMP, server_default=func.now())
 
@@ -103,7 +114,8 @@ class Feedback(db.Model):
 
 class CarouselImage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    image_url = db.Column(db.String(200), nullable=False)
+    # 长度对齐 lost_and_found.sql 中 varchar(255)
+    image_url = db.Column(db.String(255), nullable=False)
     description = db.Column(db.String(255), nullable=True)
     order = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(TIMESTAMP, server_default=func.now())
@@ -139,11 +151,14 @@ class Announcement(db.Model):
 
 class ChatMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    message = db.Column(db.Text, nullable=False)
+    # ondelete 对齐 SQL 外键 ON DELETE RESTRICT
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='RESTRICT'), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='RESTRICT'), nullable=False)
+    # 类型对齐 lost_and_found.sql 中 varchar(500)（业务层已限制 500 字符）
+    message = db.Column(db.String(500), nullable=False)
     timestamp = db.Column(db.TIMESTAMP, server_default=func.now())
-    is_read = db.Column(db.Boolean, default=False)
+    # server_default 对齐 SQL 脚本 DEFAULT 0
+    is_read = db.Column(db.Boolean, default=False, server_default=text('0'))
     read_at = db.Column(db.TIMESTAMP, nullable=True)
 
     sender = db.relationship('User', foreign_keys=[sender_id], backref='messages_sent')
@@ -168,8 +183,9 @@ class ItemMatch(db.Model):
         UniqueConstraint('lost_item_id', 'found_item_id', name='uk_lost_found'),
     )
     id = db.Column(db.Integer, primary_key=True)
-    lost_item_id = db.Column(db.Integer, db.ForeignKey('lost_item.id'), nullable=False)
-    found_item_id = db.Column(db.Integer, db.ForeignKey('found_item.id'), nullable=False)
+    # ondelete 对齐 SQL 外键 ON DELETE RESTRICT
+    lost_item_id = db.Column(db.Integer, db.ForeignKey('lost_item.id', ondelete='RESTRICT'), nullable=False)
+    found_item_id = db.Column(db.Integer, db.ForeignKey('found_item.id', ondelete='RESTRICT'), nullable=False)
     similarity_score = db.Column(db.Float, nullable=False)  # 相似度得分
     name_similarity = db.Column(db.Float, nullable=False)  # 名称相似度
     category_similarity = db.Column(db.Float, nullable=False)  # 类别相似度
@@ -201,4 +217,5 @@ class SuperAdmin(db.Model):
     __tablename__ = 'super_admins'  # 确保表名为 super_admins
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)  # 超级管理员名称
-    password = db.Column(db.String(200), nullable=False)  # 超级管理员密码
+    # 长度对齐 lost_and_found.sql 中 varchar(255)
+    password = db.Column(db.String(255), nullable=False)  # 超级管理员密码

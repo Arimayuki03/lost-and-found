@@ -89,6 +89,10 @@ def add_announcement():
             return jsonify({'error': '标题需为长度不超过200的字符串'}), 400
         if not isinstance(data['content'], str):
             return jsonify({'error': '内容需为字符串'}), 400
+        # TEXT 列上限 64KB（utf8mb4 下约 1.6 万汉字），超长写入触发 DataError 落入 500；
+        # 与用户端 description 校验上限保持一致
+        if len(data['content']) > 5000:
+            return jsonify({"error": "公告内容长度不能超过5000"}), 400
 
         # 创建新公告
         new_announcement = Announcement(
@@ -135,6 +139,9 @@ def update_announcement(announcement_id):
         if 'content' in data:
             if not isinstance(data['content'], str) or not data['content']:
                 return jsonify({'error': '内容需为非空字符串'}), 400
+            # 长度上限与创建接口一致：超长写入触发 DataError 落入 500
+            if len(data['content']) > 5000:
+                return jsonify({'error': '公告内容长度不能超过5000'}), 400
             announcement.content = data['content']
 
         # 更新时间

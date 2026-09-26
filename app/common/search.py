@@ -1,6 +1,7 @@
 from . import common
 from flask import request, jsonify, current_app
 from app.models import LostItem, FoundItem
+from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 from app.utils.page import escape_like
 from app.utils.ratelimit import ip_rate_limit
@@ -28,16 +29,14 @@ def search_items():
             # 构建失物查询
             base_query = LostItem.query.filter_by(is_under_review=False)
 
-            # 应用关键词搜索 - 分别在名称和描述中搜索
+            # 应用关键词搜索 - 在名称或描述中搜索
             if query:
-                # 在名称中搜索（转义LIKE通配符，防止用户输入%/_扰动匹配）
-                name_query = base_query.filter(LostItem.name.like(f"%{escape_like(query)}%"))
-
-                # 在描述中搜索
-                description_query = base_query.filter(LostItem.description.like(f"%{escape_like(query)}%"))
-
-                # 合并查询结果（使用UNION去重）
-                items_query = name_query.union(description_query)
+                # OR 合并替代 UNION：UNION 去重迫使 MySQL 建临时表+filesort，且 count/分页会重复执行整个 UNION
+                # （同一行的查询 OR 天然去重，语义等价）
+                items_query = base_query.filter(or_(
+                    LostItem.name.like(f"%{escape_like(query)}%"),
+                    LostItem.description.like(f"%{escape_like(query)}%")
+                ))
             else:
                 items_query = base_query
 
@@ -63,16 +62,14 @@ def search_items():
             # 构建招领查询
             base_query = FoundItem.query.filter_by(is_under_review=False)
 
-            # 应用关键词搜索 - 分别在名称和描述中搜索
+            # 应用关键词搜索 - 在名称或描述中搜索
             if query:
-                # 在名称中搜索（转义LIKE通配符，防止用户输入%/_扰动匹配）
-                name_query = base_query.filter(FoundItem.name.like(f"%{escape_like(query)}%"))
-
-                # 在描述中搜索
-                description_query = base_query.filter(FoundItem.description.like(f"%{escape_like(query)}%"))
-
-                # 合并查询结果（使用UNION去重）
-                items_query = name_query.union(description_query)
+                # OR 合并替代 UNION：UNION 去重迫使 MySQL 建临时表+filesort，且 count/分页会重复执行整个 UNION
+                # （同一行的查询 OR 天然去重，语义等价）
+                items_query = base_query.filter(or_(
+                    FoundItem.name.like(f"%{escape_like(query)}%"),
+                    FoundItem.description.like(f"%{escape_like(query)}%")
+                ))
             else:
                 items_query = base_query
 

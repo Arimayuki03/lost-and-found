@@ -21,13 +21,17 @@ def get_stats():
         unreviewed_lost_items = LostItem.query.filter_by(is_under_review=True).count()
         unreviewed_found_items = FoundItem.query.filter_by(is_under_review=True).count()
 
-        # 统计已匹配的物品数量
-        matched_items = ItemMatch.query.count()
+        # 统计已匹配的物品数量（口径与 /admin/matching/stats 对齐：distinct 物品计数）。
+        # 不能用 ItemMatch 行数×2：唯一约束是 (lost_item_id, found_item_id)，
+        # 同一失物可与多个拾物各产生一条匹配，行数×2 会重复计物品导致成功率超 100%
+        matched_lost = db.session.query(func.count(func.distinct(ItemMatch.lost_item_id))).scalar()
+        matched_found = db.session.query(func.count(func.distinct(ItemMatch.found_item_id))).scalar()
+        matched_items = matched_lost + matched_found
 
-        # 计算匹配成功率
+        # 计算匹配成功率（matched_items 已是去重后的物品数，直接作分子，不再 ×2）
         match_success_rate = 0
         if (lost_total + found_total) > 0:
-            match_success_rate = round((matched_items * 2) / (lost_total + found_total) * 100, 2)
+            match_success_rate = round(matched_items / (lost_total + found_total) * 100, 2)
 
         current_app.logger.info("成功获取失物和拾物的统计数据")
         return jsonify({
@@ -91,8 +95,9 @@ def build_calendar_month_buckets(now, months=12):
 @admin_required
 def get_lost_items_stats():
     try:
-        # 获取查询参数
-        n = request.args.get('n', default=10, type=int)
+        # 获取查询参数（夹取到 1-50：负数/0 会生成负 LIMIT 致 500，过大无意义；
+        # `or 10` 兜底 type=int 解析失败返回 None 的情况）
+        n = min(max(request.args.get('n', default=10, type=int) or 10, 1), 50)
         time_range = request.args.get('time_range', default='all')
 
         # 构建时间范围过滤条件
@@ -157,8 +162,9 @@ def get_lost_items_stats():
 @admin_required
 def get_found_items_stats():
     try:
-        # 获取查询参数
-        n = request.args.get('n', default=10, type=int)
+        # 获取查询参数（夹取到 1-50：负数/0 会生成负 LIMIT 致 500，过大无意义；
+        # `or 10` 兜底 type=int 解析失败返回 None 的情况）
+        n = min(max(request.args.get('n', default=10, type=int) or 10, 1), 50)
         time_range = request.args.get('time_range', default='all')
 
         # 构建时间范围过滤条件
